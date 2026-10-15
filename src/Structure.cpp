@@ -443,7 +443,7 @@ std::vector<Statement> Function::Region(unsigned Start, unsigned End, int BreakT
                     bool Invert;
                 };
                 std::vector<Predicate> Predicates;
-                unsigned First = Pos + 1, Candidate = First;
+                unsigned First = Pos + 1, Candidate = First, AdjacentEnd = Pos;
                 bool FinalInverted = false;
                 unsigned BooleanJoin = Limit;
                 while (Candidate < Limit && (Target <= int(I.Pc) || P.Instructions[Candidate].Pc < unsigned(Target)))
@@ -469,8 +469,8 @@ std::vector<Statement> Function::Region(unsigned Start, unsigned End, int BreakT
                             const auto &True = P.Instructions[Candidate + 2];
                             if (False.Op == LOP_LOADB && True.Op == LOP_LOADB && False.A == True.A && False.B != True.B &&
                                 Next.Target() == int(True.Pc) && False.Target() == int(True.Next) && !True.C &&
-                                Flow.Predecessors[Candidate + 1] == std::vector<unsigned>{Candidate} &&
-                                Flow.Predecessors[Candidate + 2] == std::vector<unsigned>{Candidate})
+                                Flow.Predecessors[Candidate + 1].size() == 1 && Flow.Predecessors[Candidate + 1][0] == Candidate &&
+                                Flow.Predecessors[Candidate + 2].size() == 1 && Flow.Predecessors[Candidate + 2][0] == Candidate)
                             {
                                 Candidate += 3;
                                 BooleanJoin = Candidate;
@@ -480,7 +480,13 @@ std::vector<Statement> Function::Region(unsigned Start, unsigned End, int BreakT
                         bool Invert = Next.Target() != Target && int(Next.Next) == Target;
                         if (Next.Target() != Target && !Invert)
                             break;
-                        Predicates.push_back({First, Candidate, Invert});
+                        // Ordinary adjacent chains use the existing expression
+                        // path without allocating a setup list. If setup appears
+                        // later, fold this prefix into the initial lazy test.
+                        if (Predicates.empty() && First == Candidate)
+                            AdjacentEnd = Candidate;
+                        else
+                            Predicates.push_back({First, Candidate, Invert});
                         First = ++Candidate;
                         if (Invert)
                         {
@@ -499,11 +505,13 @@ std::vector<Statement> Function::Region(unsigned Start, unsigned End, int BreakT
                 // Preserve effectful predicate setup in short-circuit guards while
                 // reconstructing their shared destination only once. Later ordinary
                 // simplification can recover a compact and/or expression.
-                if (!Predicates.empty() &&
-                    std::any_of(Predicates.begin(), Predicates.end(), [](const auto &Part) { return Part.First != Part.Test; }))
+                if (!Predicates.empty())
                 {
                     unsigned Match = E.New("Condition", Id);
-                    Out.push_back({Kind::Assign, {Match}, "(" + Condition(I) + ")"});
+                    std::vector<std::string> InitialTests;
+                    for (unsigned K = Pos; K <= AdjacentEnd; ++K)
+                        InitialTests.push_back(Condition(P.Instructions[K]));
+                    Out.push_back({Kind::Assign, {Match}, "((" + Join(InitialTests, ") or (") + "))"});
                     for (const auto &Part : Predicates)
                     {
                         Statement Guard{Kind::If, {}, "not " + Token(Match)};

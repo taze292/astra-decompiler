@@ -7,6 +7,21 @@
 inline std::vector<std::pair<std::string, std::string>> UniversalStructureCases()
 {
     std::vector<std::pair<std::string, std::string>> Cases = {
+        {"universal_adjacent_prefix_before_effectful_tests", R"(
+local log=""
+local function check(n,value) log..=n.."," return value end
+local function run(a,b,c)
+    local total=0
+    if a or b or check(3,c) or check(4,a and b) then total+=10 else total-=1 end
+    if a and b and check(5,c) and check(6,a or b) then total+=20 else total-=2 end
+    return total
+end
+local results=""
+for _,values in {{false,false,false},{false,false,true},{false,true,false},{true,false,false},{true,true,false},{true,true,true}} do
+    results..=run(values[1],values[2],values[3])..":"
+end
+return results,log
+)"},
         {"universal_empty_infinite_loop", R"(
 local function forever()
     while true do end
