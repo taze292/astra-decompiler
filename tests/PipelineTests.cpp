@@ -127,6 +127,40 @@ return answer, text, count, x, y, recurse(5), string.upper("literal")
         Reject([&] { Taze::Decompile(Bytes, S); });
         auto Result = Taze::Decompile(Bytes);
         Check(Result.Stats.InputBytes == Bytes.size() && Result.Stats.InstructionCount > 0 && Result.Stats.SymbolCount > 0, "Missing statistics");
+        std::vector<std::string_view> Inputs(19, Bytes);
+        Inputs[3] = "invalid";
+        Inputs[11] = {};
+        for (unsigned Workers : {1u, 2u, 4u, 0u, 32u})
+            for (unsigned Repeat = 0; Repeat < 3; ++Repeat)
+            {
+                auto Results = Taze::DecompileBatch(Inputs, {}, Workers);
+                Check(Results.size() == Inputs.size(), "Batch lost results");
+                for (std::size_t I = 0; I < Inputs.size(); ++I)
+                    if (I == 3 || I == 11) Check(!Results[I].Succeeded(), "Batch did not isolate malformed input");
+                    else Check(Results[I].Succeeded() && Results[I].Output.Source == Result.Source && Results[I].Output.Diagnostics == Result.Diagnostics,
+                               "Parallel result differs from serial result");
+            }
+        Check(Taze::DecompileBatch({}, {}, 4).empty(), "Empty batch failed");
+        Reject([&] { Taze::DecompileBatch(Inputs, {}, 33); });
+        // Deterministic byte mutations exercise validation without executing untrusted output.
+        unsigned Random = 0x12345678;
+        for (unsigned I = 0; I < 512; ++I)
+        {
+            Random = Random * 1664525u + 1013904223u;
+            auto Mutated = Bytes;
+            Mutated[Random % Mutated.size()] ^= char((Random >> 16) | 1);
+            Taze::Options Limits;
+            Limits.MaxAnalysisCells = 100000;
+            Limits.MaxOutputBytes = 1024 * 1024;
+            Limits.MaxNesting = 16;
+            try
+            {
+                auto A = Taze::Decompile(Mutated, Limits);
+                auto B = Taze::Decompile(Mutated, Limits);
+                Check(A.Source == B.Source && A.Diagnostics == B.Diagnostics, "Mutation produced nondeterministic output");
+            }
+            catch (const Taze::Error &) { ++Passed; }
+        }
     }
     catch (const std::exception &Error)
     {

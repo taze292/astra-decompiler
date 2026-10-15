@@ -1,5 +1,7 @@
 #include "Taze/Decompiler.hpp"
 #include "WebSocketServer.hpp"
+#include "BatchFiles.hpp"
+#include <charconv>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -15,6 +17,10 @@ int main(int Argc, char **Argv)
         bool Assembly = false;
         bool Server = false;
         bool Stats = false;
+        bool Batch = false, Overwrite = false;
+        unsigned Jobs = 1;
+        std::string OutputDirectory;
+        std::vector<std::string> Inputs;
         unsigned Port = 8877;
         for (int I = 1; I < Argc; ++I)
         {
@@ -53,11 +59,23 @@ int main(int Argc, char **Argv)
                              "  --max-analysis-cells N       Per-function analysis cap (1..64000000)\n"
                              "  --max-nesting N              Closure nesting cap (1..128)\n"
                              "  --stats                      Print stage timings and counts to stderr\n"
+                             "  --batch --output-dir DIR      Decompile multiple files in input order\n"
+                             "  --jobs N                     Batch workers (0=auto, 1..32; default 1)\n"
+                             "  --overwrite                  Allow replacing existing batch outputs\n"
                              "Boolean options also accept --KEY true|false. See docs/OPTIONS.md.\n";
                 return 0;
             }
             if (Arg == "-o" || Arg == "--output")
                 Output = Value();
+            else if (Arg == "--batch") Batch = true;
+            else if (Arg == "--overwrite") Overwrite = true;
+            else if (Arg == "--output-dir") OutputDirectory = Value();
+            else if (Arg == "--jobs")
+            {
+                auto Text = Value();
+                auto [End, Error] = std::from_chars(Text.data(), Text.data() + Text.size(), Jobs);
+                if (Error != std::errc{} || End != Text.data() + Text.size() || Jobs > 32) throw Taze::Error("Jobs must be 0..32");
+            }
             else if (Arg == "--disassemble")
                 Assembly = true;
             else if (Arg == "--serve")
@@ -88,12 +106,18 @@ int main(int Argc, char **Argv)
                 Taze::ApplyOption(Settings, Arg.substr(2), Value());
             else if (Arg.starts_with('-'))
                 throw Taze::Error("Unknown option " + Arg);
-            else if (Input.empty())
-                Input = Arg;
             else
-                throw Taze::Error("Expected exactly one input file");
+                Inputs.push_back(Arg);
         }
         Taze::ValidateOptions(Settings);
+        if (Batch)
+        {
+            if (Server || Assembly || Stats || !Output.empty()) throw Taze::Error("--batch cannot be combined with --serve, --disassemble, --stats, or -o");
+            return Taze::DecompileFiles(Inputs, OutputDirectory, Settings, Jobs, Overwrite);
+        }
+        if (!OutputDirectory.empty() || Overwrite || Jobs != 1) throw Taze::Error("Batch options require --batch");
+        if (Inputs.size() > 1) throw Taze::Error("Multiple inputs require --batch");
+        if (!Inputs.empty()) Input = Inputs.front();
         if (Server)
         {
             if (!Input.empty() || !Output.empty() || Assembly)

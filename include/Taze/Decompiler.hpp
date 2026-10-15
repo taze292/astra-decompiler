@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <stdexcept>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -77,4 +78,14 @@ std::string Disassemble(std::string_view Bytecode, const Options &Settings = {})
 // Strict, shared option handling. Keys use CLI spelling without the leading '--'.
 void ApplyOption(Options &Settings, std::string_view Key, std::string_view Value);
 void ValidateOptions(const Options &Settings);
+
+struct BatchResult
+{
+    Result Output;
+    std::string Failure;
+    bool Succeeded() const { return Failure.empty(); }
+};
+// Inputs remain alive until this synchronous call returns. Results preserve input order.
+// Workers=0 selects up to 8 hardware threads; explicit worker counts are capped at 32.
+std::vector<BatchResult> DecompileBatch(std::span<const std::string_view> Inputs, const Options &Settings = {}, unsigned Workers = 1);
 } // namespace Taze

@@ -14,7 +14,7 @@ if(NOT EXISTS "${TAZE_LUAU_DIR}/Common/include/Luau/Bytecode.h")
 endif()
 
 add_library(TazeDecompiler
-    src/Bytecode.cpp src/ControlFlow.cpp src/Exports.cpp src/Decompiler.cpp src/Options.cpp
+    src/Bytecode.cpp src/ControlFlow.cpp src/Exports.cpp src/Decompiler.cpp src/Options.cpp src/Batch.cpp
     src/Expressions.cpp src/Symbols.cpp src/Analysis.cpp src/Lowering.cpp
     src/Structure.cpp src/Optimize.cpp src/Render.cpp)
 target_include_directories(TazeDecompiler PUBLIC include PRIVATE "${TAZE_LUAU_DIR}/Common/include")
@@ -23,10 +23,14 @@ if(MSVC)
 else()
     target_compile_options(TazeDecompiler PRIVATE -Wall -Wextra -Wpedantic)
 endif()
-add_executable(taze src/Main.cpp src/WebSocketServer.cpp)
+find_package(Threads REQUIRED)
+target_link_libraries(TazeDecompiler PRIVATE Threads::Threads)
+add_executable(taze src/Main.cpp src/WebSocketServer.cpp src/BatchFiles.cpp)
 target_link_libraries(taze PRIVATE TazeDecompiler)
 add_executable(taze-bench tools/Benchmark.cpp)
 target_link_libraries(taze-bench PRIVATE TazeDecompiler)
+add_executable(taze-batch-bench tools/BatchBenchmark.cpp)
+target_link_libraries(taze-batch-bench PRIVATE TazeDecompiler)
 if(WIN32)
     target_link_libraries(taze PRIVATE ws2_32 bcrypt)
 endif()
