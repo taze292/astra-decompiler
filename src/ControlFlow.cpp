@@ -267,12 +267,28 @@ ControlFlow::ControlFlow(const Prototype &P, std::size_t MaxCells, AnalysisBudge
 
     LiveIn.resize(Count + 1);
     std::vector<std::bitset<256>> Uses(Count), Definitions(Count);
+    std::bitset<256> ReferenceRegisters;
+    for (const auto &I : P.Instructions)
+        for (auto [Kind, Register] : I.Captures)
+            if (Kind == LCT_REF)
+                ReferenceRegisters.set(Register);
     std::queue<unsigned> Queue;
     std::vector<bool> Queued(Count, true);
     for (unsigned J = 0; J < Count; ++J)
     {
-        for (auto R : Reads(P.Instructions[J], P))
-            Uses[J].set(R);
+        const auto &I = P.Instructions[J];
+        // CLOSEUPVALS observes only open reference captures. Treating the whole
+        // register suffix as live makes unrelated loop temporaries appear to
+        // escape and prevents safe structured loop reconstruction.
+        if (I.Op == LOP_CLOSEUPVALS)
+        {
+            for (unsigned R = I.A; R < P.Stack; ++R)
+                if (ReferenceRegisters.test(R))
+                    Uses[J].set(R);
+        }
+        else
+            for (auto R : Reads(I, P))
+                Uses[J].set(R);
         for (auto R : Writes(P.Instructions[J], P))
             Definitions[J].set(R);
         Queue.push(Count - J - 1);

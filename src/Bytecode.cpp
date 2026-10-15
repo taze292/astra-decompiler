@@ -246,6 +246,7 @@ void Decode(Chunk &C, OpcodeEncoding Encoding)
             case LOP_SETUPVAL:
             case LOP_JUMPIF:
             case LOP_JUMPIFNOT:
+            case LOP_CMPPROTO:
             case LOP_JUMPXEQKNIL:
             case LOP_JUMPXEQKB:
             case LOP_JUMPXEQKN:
