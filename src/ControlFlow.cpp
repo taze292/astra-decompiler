@@ -244,7 +244,8 @@ ControlFlow::ControlFlow(const Prototype &P, std::size_t MaxCells, AnalysisBudge
     unsigned Clock = 0;
     for (unsigned Root = 0; Root <= Count; ++Root)
     {
-        if (Dominators[Root] >= 0 && unsigned(Dominators[Root]) != Root) continue;
+        if (Dominators[Root] >= 0 && unsigned(Dominators[Root]) != Root)
+            continue;
         std::vector<std::pair<unsigned, unsigned>> Stack{{Root, 0}};
         DomEnter[Root] = Clock++;
         while (!Stack.empty())

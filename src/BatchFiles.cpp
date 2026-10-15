@@ -20,25 +20,33 @@ std::string PathKey(const std::filesystem::path &Path)
 #endif
     return Key;
 }
-}
+} // namespace
 
-int DecompileFiles(const std::vector<std::string> &Inputs, const std::string &Directory, const Options &Settings, unsigned Workers, bool Overwrite)
+int DecompileFiles(const std::vector<std::string> &Inputs, const std::string &Directory, const Options &Settings, unsigned Workers,
+                   bool Overwrite)
 {
-    if (Inputs.empty() || Directory.empty()) throw Error("--batch needs inputs and --output-dir");
-    if (Workers > 32) throw Error("Worker count must be 0..32");
-    if (Workers == 0) Workers = std::clamp(std::thread::hardware_concurrency(), 1u, 8u);
+    if (Inputs.empty() || Directory.empty())
+        throw Error("--batch needs inputs and --output-dir");
+    if (Workers > 32)
+        throw Error("Worker count must be 0..32");
+    if (Workers == 0)
+        Workers = std::clamp(std::thread::hardware_concurrency(), 1u, 8u);
     std::vector<std::filesystem::path> Outputs;
     std::set<std::string> InputPaths, OutputPaths;
-    for (const auto &Input : Inputs) InputPaths.insert(PathKey(Input));
+    for (const auto &Input : Inputs)
+        InputPaths.insert(PathKey(Input));
     for (const auto &Input : Inputs)
     {
         auto Output = std::filesystem::path(Directory) / (std::filesystem::path(Input).stem().string() + ".luau");
         auto Key = PathKey(Output);
-        if (!OutputPaths.insert(Key).second) throw Error("Batch output filename collision: " + Output.string());
-        if (InputPaths.count(Key)) throw Error("Batch output would overwrite an input: " + Output.string());
+        if (!OutputPaths.insert(Key).second)
+            throw Error("Batch output filename collision: " + Output.string());
+        if (InputPaths.count(Key))
+            throw Error("Batch output would overwrite an input: " + Output.string());
         if (std::filesystem::exists(Output))
         {
-            if (!Overwrite || !std::filesystem::is_regular_file(Output)) throw Error("Batch output already exists: " + Output.string());
+            if (!Overwrite || !std::filesystem::is_regular_file(Output))
+                throw Error("Batch output already exists: " + Output.string());
             for (const auto &Other : Inputs)
                 if (std::filesystem::exists(Other) && std::filesystem::equivalent(Other, Output))
                     throw Error("Batch output aliases an input: " + Output.string());
@@ -57,27 +65,38 @@ int DecompileFiles(const std::vector<std::string> &Inputs, const std::string &Di
         {
             try
             {
-                if (std::filesystem::file_size(Inputs[Start + I]) > Settings.MaxInputBytes) throw Error("Input exceeds configured byte limit");
+                if (std::filesystem::file_size(Inputs[Start + I]) > Settings.MaxInputBytes)
+                    throw Error("Input exceeds configured byte limit");
                 std::ifstream File(Inputs[Start + I], std::ios::binary);
-                if (!File) throw Error("Cannot open input");
+                if (!File)
+                    throw Error("Cannot open input");
                 Bytes[I].assign(std::istreambuf_iterator<char>(File), {});
                 Views[I] = Bytes[I];
             }
-            catch (const std::exception &Failure) { Failures[I] = Failure.what(); }
+            catch (const std::exception &Failure)
+            {
+                Failures[I] = Failure.what();
+            }
         }
         auto Results = DecompileBatch(Views, Settings, Workers);
         for (std::size_t I = 0; I < Count; ++I)
         {
-            if (Failures[I].empty()) Failures[I] = Results[I].Failure;
+            if (Failures[I].empty())
+                Failures[I] = Results[I].Failure;
             if (Failures[I].empty())
             {
                 std::ofstream Out(Outputs[Start + I], std::ios::binary);
                 const auto &Source = Results[I].Output.Source;
-                if (!Out || !Out.write(Source.data(), std::streamsize(Source.size()))) Failures[I] = "Cannot write output";
+                if (!Out || !Out.write(Source.data(), std::streamsize(Source.size())))
+                    Failures[I] = "Cannot write output";
                 for (const auto &Diagnostic : Results[I].Output.Diagnostics)
                     std::cerr << Inputs[Start + I] << ": " << Diagnostic << '\n';
             }
-            if (!Failures[I].empty()) { ++Failed; std::cerr << Inputs[Start + I] << ": " << Failures[I] << '\n'; }
+            if (!Failures[I].empty())
+            {
+                ++Failed;
+                std::cerr << Inputs[Start + I] << ": " << Failures[I] << '\n';
+            }
         }
     }
     std::cerr << "taze: " << Inputs.size() - Failed << " succeeded, " << Failed << " failed\n";

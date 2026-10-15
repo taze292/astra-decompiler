@@ -49,7 +49,8 @@ unsigned Exports::Record(const Prototype &P, const ControlFlow &Flow, unsigned P
     Frames.push_back({Proto, Parameters, {}});
     std::vector<unsigned> Returns;
     for (unsigned J = 0; J < P.Instructions.size(); ++J)
-        if (P.Instructions[J].Op == LOP_RETURN) Returns.push_back(J);
+        if (P.Instructions[J].Op == LOP_RETURN)
+            Returns.push_back(J);
     auto Certain = [&](unsigned Index)
     {
         for (unsigned J : Returns)

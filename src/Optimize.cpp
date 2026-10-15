@@ -338,5 +338,4 @@ void Function::Optimize(std::vector<Statement> &Nodes)
     Tables(Nodes);
 }
 
-
 } // namespace Taze::Detail

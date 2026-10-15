@@ -10,14 +10,13 @@ Engine::Engine(const Chunk &Bytecode, const Options &Options) : C(Bytecode), Set
         for (const auto &I : P.Instructions)
         {
             if (I.Op == LOP_GETGLOBAL || I.Op == LOP_SETGLOBAL)
-                Names.insert(P.Constants[I.Aux].Text);
+                GlobalNames.insert(P.Constants[I.Aux].Text);
             if (I.Op == LOP_GETIMPORT)
-                Names.insert(P.Constants[(I.Aux >> 20) & 1023].Text);
+                GlobalNames.insert(P.Constants[(I.Aux >> 20) & 1023].Text);
         }
     for (const char *Name : {"game", "workspace", "script", "math", "string", "table", "coroutine", "vector", "integer", "getfenv",
                              "setmetatable", "next", "type", "select", "error", "tonumber"})
-        Names.insert(Name);
-    GlobalNames = Names;
+        GlobalNames.insert(Name);
 }
 unsigned Engine::New(std::string Name, unsigned Owner, bool Keep, bool Parameter, bool Cell, bool Preserve, bool Debug)
 {
@@ -26,13 +25,10 @@ unsigned Engine::New(std::string Name, unsigned Owner, bool Keep, bool Parameter
         std::all_of(Name.begin() + 5, Name.end(), [](unsigned char C) { return std::isdigit(C); }))
         Name = "Value" + std::to_string(++NextValue);
     Name = Preserve && Identifier(Name) ? Name : Pascal(Name);
-    std::string Base = Name;
-    unsigned Suffix = 2;
-    while (Names.count(Name))
-        Name = Base + std::to_string(Suffix++);
-    Names.insert(Name);
     unsigned Id = unsigned(Symbols.size());
-    Symbols.push_back({Name, Base, Keep, Parameter, Cell, Owner, false, {}, std::move(Original), Preserve, Debug});
+    // Provisional names need no uniqueness: all internal references use symbol IDs.
+    // Only surviving bindings receive collision-free names during finalization.
+    Symbols.push_back({Name, Keep, Parameter, Cell, Owner, false, {}, std::move(Original), Preserve, Debug});
     return Id;
 }
 void Engine::Rename(unsigned Target, unsigned Source)
@@ -40,14 +36,14 @@ void Engine::Rename(unsigned Target, unsigned Source)
     auto &S = Symbols[Target];
     const auto &From = Symbols[Source];
     S.Name = From.Name;
-    S.Base = From.Base;
     S.Original = From.Original;
     S.Preserve = From.Preserve;
     S.Debug = From.Debug;
 }
 bool Engine::AnalyzeExports() const
 {
-    return Settings.IncludeLineComments && Settings.IncludeFunctionLocators && Settings.IncludeRequireLocators && !Settings.ModulePath.empty();
+    return Settings.IncludeLineComments && Settings.IncludeFunctionLocators && Settings.IncludeRequireLocators &&
+           !Settings.ModulePath.empty();
 }
 std::string Engine::Resolve(std::string Text)
 {
@@ -56,7 +52,8 @@ std::string Engine::Resolve(std::string Text)
     for (const auto &[Proto, Fallback] : Locators)
     {
         auto It = Paths.find(Proto);
-        auto Lookup = It == Paths.end() ? (Settings.IncludeGcLocators ? Fallback : "") : "require(" + Settings.ModulePath + ")" + It->second;
+        auto Lookup =
+            It == Paths.end() ? (Settings.IncludeGcLocators ? Fallback : "") : "require(" + Settings.ModulePath + ")" + It->second;
         Lookups[Proto] = Lookup.empty() ? "" : " | " + Lookup;
     }
     auto References = Tokens(Text);
@@ -85,13 +82,15 @@ std::string Engine::Resolve(std::string Text)
         for (auto Id : ByOwner[Owner])
         {
             auto &S = Symbols[Id];
-            std::string Base = S.Base;
+            std::string Base = S.Name;
             bool Generic = Base.starts_with("Value") && Base.size() > 5 &&
                            std::all_of(Base.begin() + 5, Base.end(), [](unsigned char C) { return std::isdigit(C); });
-            Generic = Generic || Settings.Naming == VariableNaming::Generic || (Settings.Naming == VariableNaming::Debug && !S.Debug && !S.Preserve);
+            Generic = Generic || Settings.Naming == VariableNaming::Generic ||
+                      (Settings.Naming == VariableNaming::Debug && !S.Debug && !S.Preserve);
             if (Generic)
             {
-                const auto Prefix = CaseName(S.Parameter ? "Argument" : (!Settings.UseTypeNames || S.Category.empty() ? "Value" : S.Category), Settings.Casing);
+                const auto Prefix = CaseName(
+                    S.Parameter ? "Argument" : (!Settings.UseTypeNames || S.Category.empty() ? "Value" : S.Category), Settings.Casing);
                 do
                 {
                     S.Name = Prefix + std::to_string(++Counters[Prefix]);
@@ -99,7 +98,8 @@ std::string Engine::Resolve(std::string Text)
             }
             else
             {
-                Base = S.Preserve && Settings.PreserveFunctionNames && Identifier(S.Original) ? S.Original : CaseName(S.Original, Settings.Casing);
+                Base = S.Preserve && Settings.PreserveFunctionNames && Identifier(S.Original) ? S.Original
+                                                                                              : CaseName(S.Original, Settings.Casing);
                 S.Name = Base;
                 unsigned Suffix = 2;
                 while (Taken.count(S.Name))
@@ -130,10 +130,12 @@ std::string Engine::Resolve(std::string Text)
         Append(std::string_view(Text).substr(Pos, Next - Pos));
         bool Symbol = Text[Next] == '\x1f';
         auto End = Text.find(Symbol ? '\x1e' : '\x1c', Next + 1);
-        if (End == std::string::npos) throw Error("Internal: unterminated output token");
+        if (End == std::string::npos)
+            throw Error("Internal: unterminated output token");
         unsigned Id = 0;
         auto [Last, Status] = std::from_chars(Text.data() + Next + 1, Text.data() + End, Id);
-        if (Status != std::errc{} || Last != Text.data() + End) throw Error("Internal: invalid output token");
+        if (Status != std::errc{} || Last != Text.data() + End)
+            throw Error("Internal: invalid output token");
         Append(Symbol ? Symbols.at(Id).Name : Lookups.at(Id));
         Pos = End + 1;
     }

@@ -64,7 +64,6 @@ struct Statement
 struct Symbol
 {
     std::string Name;
-    std::string Base;
     bool Keep = false, Parameter = false, Cell = false;
     unsigned Owner = 0;
     bool ReferenceAlias = false;
@@ -146,7 +145,6 @@ class Engine
     AnalysisBudget Analysis;
     Result Output;
     std::vector<Symbol> Symbols;
-    std::set<std::string> Names;
     std::set<std::string> GlobalNames;
     std::map<unsigned, std::set<unsigned>> Parents;
     Exports ExportGraph;
@@ -156,7 +154,8 @@ class Engine
     unsigned NextValue = 0;
 
     Engine(const Chunk &Bytecode, const Options &Options);
-    unsigned New(std::string Name, unsigned Owner, bool Keep = false, bool Parameter = false, bool Cell = false, bool Preserve = false, bool Debug = false);
+    unsigned New(std::string Name, unsigned Owner, bool Keep = false, bool Parameter = false, bool Cell = false, bool Preserve = false,
+                 bool Debug = false);
     void Rename(unsigned Target, unsigned Source);
     bool AnalyzeExports() const;
     std::string Resolve(std::string Text);

@@ -98,6 +98,7 @@ for _, Mode in { "Line", "StartLine", "Both", "Ignored", "Missing", "Hidden" } d
     assert(Bridge.Version == 5 and Bridge.Decompile == Environment.decompile)
     assert(Environment.decompile({}) == nil, "Invalid targets must exit silently")
     assert(Environment.decompile(Target, 0) == nil, "Invalid timeouts must exit silently")
+    assert(Environment.decompile(Target, 0/0) == nil, "NaN timeout must be rejected")
     local SavedBytecode = Target.Bytecode
     Target.Bytecode = nil
     assert(Environment.decompile(Target) == nil, "Missing bytecode must exit silently")
@@ -166,6 +167,26 @@ for _, Mode in { "Line", "StartLine", "Both", "Ignored", "Missing", "Hidden" } d
     assert(Environment.decompile == Original and Environment.TazeBridge == nil)
     assert(Original(Target) == "original", "Stop did not restore the cached decompiler")
     assert(SavedWrapper(Target) == "wrapper", "Stop did not restore the cached wrapper")
+    Environment.TazeConfig.Options = { ["gc-locators"] = false }
+    Environment.TazeConfig.MaxPending = 1
+    local Limited = Install(Environment)
+    assert(Limited.LineProbe == "disabled", "Disabled GC lookups should skip probing")
+    assert(Limited.Decompile(Target, { ["gc-locators"] = true }) == "return 1")
+    assert(Limited.LineProbe ~= "disabled", "Enabling GC per call should probe lazily")
+    local Send = Environment.Socket.Send
+    local NestedError
+    Environment.Socket.Send = function(self, Message)
+        assert(Limited.Decompile(Target) == nil)
+        NestedError = Limited.LastError
+        Send(self, Message)
+    end
+    assert(Limited.Decompile(Target) == "return 1")
+    assert(NestedError == "Taze pending request limit reached")
+    Environment.Socket.Send = function() end
+    assert(Limited.Decompile(Target, 0.5) == nil and Limited.LastError == "Taze request timed out")
+    Environment.Socket.Send = Send
+    assert(Limited.Decompile(Target) == "return 1", "Timeout leaked pending state")
+    Limited.Stop()
     Passed += 1
 end
 return Passed

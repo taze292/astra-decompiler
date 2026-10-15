@@ -99,7 +99,7 @@ try {
     Send-Text $Socket ("100`nTAZE3`nLine`n`n$OptionHex`n" + $Module.Hex)
     $Configured = Receive-Text $Socket
     Check ($Configured.StartsWith("100`nok`n") -and -not $Configured.Contains('Decompiled by Taze') -and -not $Configured.Contains(' | ')) 'Per-request options failed'
-    foreach ($Bad in @('casing=invalid', 'indent=2junk', 'header=true;header=false', 'module-path=game', 'max-output-bytes=268435456', 'header=false;', 'unknown=true')) {
+    foreach ($Bad in @('casing=invalid', 'indent=2junk', 'header=true;header=false', 'module-path=game', 'max-output-bytes=268435456', 'max-analysis-work=64000000', 'header=false;', 'unknown=true')) {
         $BadHex = Option-Hex $Bad
         Send-Text $Socket ("101`nTAZE3`nLine`n`n$BadHex`n" + $Small.Hex)
         Check ((Receive-Text $Socket).StartsWith("101`nerror`n")) "Invalid request options accepted: $Bad"

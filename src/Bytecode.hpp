@@ -55,7 +55,10 @@ struct Prototype
     std::vector<Instruction> Instructions;
     // AUX and CAPTURE words have no executable instruction index.
     std::vector<int> PcToInstruction;
-    int AtPc(unsigned Pc) const { return Pc < PcToInstruction.size() ? PcToInstruction[Pc] : -1; }
+    int AtPc(unsigned Pc) const
+    {
+        return Pc < PcToInstruction.size() ? PcToInstruction[Pc] : -1;
+    }
 };
 
 struct Chunk

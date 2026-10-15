@@ -234,9 +234,11 @@ std::string Process(std::string_view Request, const Options &Settings)
                     if (Key == "module-path" || Key == "filter-line" || !Seen.insert(std::string(Key)).second)
                         throw Error("Duplicate or reserved bridge option");
                     ApplyOption(RequestSettings, Key, Entry.substr(Equals + 1));
-                    if (End == std::string_view::npos) break;
+                    if (End == std::string_view::npos)
+                        break;
                     Remaining.remove_prefix(End + 1);
-                    if (Remaining.empty()) throw Error("Empty trailing bridge option");
+                    if (Remaining.empty())
+                        throw Error("Empty trailing bridge option");
                 }
                 // Remote requests may lower the host's resource caps, never raise them.
                 if (RequestSettings.MaxInputBytes > Settings.MaxInputBytes || RequestSettings.MaxOutputBytes > Settings.MaxOutputBytes ||

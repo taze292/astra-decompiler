@@ -9,9 +9,11 @@ int main(int Argc, char **Argv)
 {
     try
     {
-        if (Argc != 2) throw Taze::Error("Usage: taze-batch-bench INPUT.luac");
+        if (Argc != 2)
+            throw Taze::Error("Usage: taze-batch-bench INPUT.luac");
         std::ifstream File(Argv[1], std::ios::binary);
-        if (!File) throw Taze::Error("Cannot open input");
+        if (!File)
+            throw Taze::Error("Cannot open input");
         std::string Bytes((std::istreambuf_iterator<char>(File)), {});
         auto Expected = Taze::Decompile(Bytes);
         std::vector<std::string_view> Inputs(64, Bytes);
@@ -34,5 +36,9 @@ int main(int Argc, char **Argv)
             std::cout << Workers << ",64,7," << Times[3] << ',' << 64000 / Times[3] << '\n';
         }
     }
-    catch (const std::exception &Failure) { std::cerr << Failure.what() << '\n'; return 1; }
+    catch (const std::exception &Failure)
+    {
+        std::cerr << Failure.what() << '\n';
+        return 1;
+    }
 }

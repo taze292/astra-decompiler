@@ -2,8 +2,8 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <stdexcept>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -17,8 +17,19 @@ enum class OpcodeEncoding
     Auto
 };
 
-enum class VariableCase { Pascal, Camel, Snake, Preserve };
-enum class VariableNaming { Inferred, Debug, Generic };
+enum class VariableCase
+{
+    Pascal,
+    Camel,
+    Snake,
+    Preserve
+};
+enum class VariableNaming
+{
+    Inferred,
+    Debug,
+    Generic
+};
 
 struct Options
 {
@@ -85,7 +96,10 @@ struct BatchResult
 {
     Result Output;
     std::string Failure;
-    bool Succeeded() const { return Failure.empty(); }
+    bool Succeeded() const
+    {
+        return Failure.empty();
+    }
 };
 // Inputs remain alive until this synchronous call returns. Results preserve input order.
 // Workers=0 selects up to 8 hardware threads; explicit worker counts are capped at 32.

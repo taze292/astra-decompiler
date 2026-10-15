@@ -51,18 +51,25 @@ std::string CaseName(std::string_view Text, VariableCase Casing)
             unsigned char C = Text[I];
             if (C >= 128 || !std::isalnum(C))
             {
-                if (!Out.empty() && Out.back() != '_') Out += '_';
+                if (!Out.empty() && Out.back() != '_')
+                    Out += '_';
                 continue;
             }
-            bool Boundary = I > 0 && std::isupper(C) &&
+            bool Boundary =
+                I > 0 && std::isupper(C) &&
                 (std::islower(static_cast<unsigned char>(Text[I - 1])) || std::isdigit(static_cast<unsigned char>(Text[I - 1])) ||
-                 (std::isupper(static_cast<unsigned char>(Text[I - 1])) && I + 1 < Text.size() && std::islower(static_cast<unsigned char>(Text[I + 1]))));
-            if (Boundary && !Out.empty() && Out.back() != '_') Out += '_';
+                 (std::isupper(static_cast<unsigned char>(Text[I - 1])) && I + 1 < Text.size() &&
+                  std::islower(static_cast<unsigned char>(Text[I + 1]))));
+            if (Boundary && !Out.empty() && Out.back() != '_')
+                Out += '_';
             Out += char(std::tolower(C));
         }
-        while (!Out.empty() && Out.back() == '_') Out.pop_back();
-        if (Out.empty()) Out = "value";
-        if (std::isdigit(static_cast<unsigned char>(Out.front()))) Out = "value_" + Out;
+        while (!Out.empty() && Out.back() == '_')
+            Out.pop_back();
+        if (Out.empty())
+            Out = "value";
+        if (std::isdigit(static_cast<unsigned char>(Out.front())))
+            Out = "value_" + Out;
     }
     else
     {
@@ -70,11 +77,13 @@ std::string CaseName(std::string_view Text, VariableCase Casing)
         if (Casing == VariableCase::Camel)
             for (std::size_t I = 0; I < Out.size() && std::isupper(static_cast<unsigned char>(Out[I])); ++I)
             {
-                if (I > 0 && I + 1 < Out.size() && std::islower(static_cast<unsigned char>(Out[I + 1]))) break;
+                if (I > 0 && I + 1 < Out.size() && std::islower(static_cast<unsigned char>(Out[I + 1])))
+                    break;
                 Out[I] = char(std::tolower(static_cast<unsigned char>(Out[I])));
             }
     }
-    if (!Identifier(Out)) Out += '_';
+    if (!Identifier(Out))
+        Out += '_';
     return Out;
 }
 
@@ -342,6 +351,5 @@ std::string FormatCondition(std::string Text, unsigned ParentPrecedence)
     }
     return Text;
 }
-
 
 } // namespace Taze::Detail

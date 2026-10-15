@@ -1,6 +1,6 @@
+#include "BatchFiles.hpp"
 #include "Taze/Decompiler.hpp"
 #include "WebSocketServer.hpp"
-#include "BatchFiles.hpp"
 #include <charconv>
 #include <filesystem>
 #include <fstream>
@@ -68,14 +68,18 @@ int main(int Argc, char **Argv)
             }
             if (Arg == "-o" || Arg == "--output")
                 Output = Value();
-            else if (Arg == "--batch") Batch = true;
-            else if (Arg == "--overwrite") Overwrite = true;
-            else if (Arg == "--output-dir") OutputDirectory = Value();
+            else if (Arg == "--batch")
+                Batch = true;
+            else if (Arg == "--overwrite")
+                Overwrite = true;
+            else if (Arg == "--output-dir")
+                OutputDirectory = Value();
             else if (Arg == "--jobs")
             {
                 auto Text = Value();
                 auto [End, Error] = std::from_chars(Text.data(), Text.data() + Text.size(), Jobs);
-                if (Error != std::errc{} || End != Text.data() + Text.size() || Jobs > 32) throw Taze::Error("Jobs must be 0..32");
+                if (Error != std::errc{} || End != Text.data() + Text.size() || Jobs > 32)
+                    throw Taze::Error("Jobs must be 0..32");
             }
             else if (Arg == "--disassemble")
                 Assembly = true;
@@ -89,7 +93,8 @@ int main(int Argc, char **Argv)
             {
                 if (I + 1 < Argc && (std::string_view(Argv[I + 1]) == "true" || std::string_view(Argv[I + 1]) == "false"))
                     Taze::ApplyOption(Settings, "state-machine", Value());
-                else Settings.ForceStateMachine = true;
+                else
+                    Settings.ForceStateMachine = true;
             }
             else if (Arg == "--port")
             {
@@ -102,9 +107,14 @@ int main(int Argc, char **Argv)
             }
             else if (Arg.starts_with("--no-"))
             {
-                static const std::set<std::string> Flags = {"header", "lines", "upvalues", "locators", "gc-locators", "require-locators", "type-names", "preserve-function-names", "fallback", "state-machine"};
+                static const std::set<std::string> Flags = {"header",      "lines",
+                                                            "upvalues",    "locators",
+                                                            "gc-locators", "require-locators",
+                                                            "type-names",  "preserve-function-names",
+                                                            "fallback",    "state-machine"};
                 auto Key = Arg.substr(5);
-                if (!Flags.count(Key)) throw Taze::Error("Unknown flag " + Arg);
+                if (!Flags.count(Key))
+                    throw Taze::Error("Unknown flag " + Arg);
                 Taze::ApplyOption(Settings, Key, "false");
             }
             else if (Arg.starts_with("--"))
@@ -117,12 +127,16 @@ int main(int Argc, char **Argv)
         Taze::ValidateOptions(Settings);
         if (Batch)
         {
-            if (Server || Assembly || Stats || !Output.empty()) throw Taze::Error("--batch cannot be combined with --serve, --disassemble, --stats, or -o");
+            if (Server || Assembly || Stats || !Output.empty())
+                throw Taze::Error("--batch cannot be combined with --serve, --disassemble, --stats, or -o");
             return Taze::DecompileFiles(Inputs, OutputDirectory, Settings, Jobs, Overwrite);
         }
-        if (!OutputDirectory.empty() || Overwrite || Jobs != 1) throw Taze::Error("Batch options require --batch");
-        if (Inputs.size() > 1) throw Taze::Error("Multiple inputs require --batch");
-        if (!Inputs.empty()) Input = Inputs.front();
+        if (!OutputDirectory.empty() || Overwrite || Jobs != 1)
+            throw Taze::Error("Batch options require --batch");
+        if (Inputs.size() > 1)
+            throw Taze::Error("Multiple inputs require --batch");
+        if (!Inputs.empty())
+            Input = Inputs.front();
         if (Server)
         {
             if (!Input.empty() || !Output.empty() || Assembly || Stats)
@@ -146,9 +160,8 @@ int main(int Argc, char **Argv)
             if (Stats)
                 std::cerr << "taze: decode_ms=" << Result.Stats.DecodeMilliseconds
                           << " reconstruct_ms=" << Result.Stats.ReconstructionMilliseconds
-                          << " finalize_ms=" << Result.Stats.FinalizationMilliseconds
-                          << " instructions=" << Result.Stats.InstructionCount << " symbols=" << Result.Stats.SymbolCount
-                          << " analysis_work=" << Result.Stats.AnalysisWork
+                          << " finalize_ms=" << Result.Stats.FinalizationMilliseconds << " instructions=" << Result.Stats.InstructionCount
+                          << " symbols=" << Result.Stats.SymbolCount << " analysis_work=" << Result.Stats.AnalysisWork
                           << " fallbacks=" << Result.StateMachineFunctions << '\n';
             Source = std::move(Result.Source);
             for (const auto &Diagnostic : Result.Diagnostics)

@@ -47,9 +47,8 @@ int main(int Argc, char **Argv)
         double Median = Times[Times.size() / 2];
         double P95 = Times[(Times.size() * 95 + 99) / 100 - 1];
         std::cout << "input_bytes,output_bytes,functions,fallbacks,samples,median_ms,p95_ms,inputs_per_second\n"
-                  << Bytes.size() << ',' << Expected.Source.size() << ',' << Expected.FunctionCount << ','
-                  << Expected.StateMachineFunctions << ',' << Samples << ',' << std::fixed << std::setprecision(4) << Median << ','
-                  << P95 << ',' << 1000.0 / Median << '\n';
+                  << Bytes.size() << ',' << Expected.Source.size() << ',' << Expected.FunctionCount << ',' << Expected.StateMachineFunctions
+                  << ',' << Samples << ',' << std::fixed << std::setprecision(4) << Median << ',' << P95 << ',' << 1000.0 / Median << '\n';
     }
     catch (const std::exception &Error)
     {

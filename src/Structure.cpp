@@ -294,5 +294,4 @@ std::vector<Statement> Function::StateMachine()
     return Out;
 }
 
-
 } // namespace Taze::Detail

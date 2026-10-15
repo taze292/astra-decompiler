@@ -10,7 +10,8 @@ struct AnalysisBudget
     std::size_t Remaining;
     void Spend(std::size_t Amount = 1)
     {
-        if (Amount > Remaining) throw Error("Analysis exceeds configured work limit");
+        if (Amount > Remaining)
+            throw Error("Analysis exceeds configured work limit");
         Remaining -= Amount;
     }
 };

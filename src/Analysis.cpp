@@ -3,7 +3,8 @@
 namespace Taze::Detail
 {
 Function::Function(Engine &Owner, unsigned Proto, std::vector<Upvalue> Captures, unsigned Nesting)
-    : E(Owner), P(E.C.Prototypes.at(Proto)), Flow(P, E.Settings.MaxAnalysisCells, E.Analysis), Id(Proto), Depth(Nesting), Upvalues(std::move(Captures))
+    : E(Owner), P(E.C.Prototypes.at(Proto)), Flow(P, E.Settings.MaxAnalysisCells, E.Analysis), Id(Proto), Depth(Nesting),
+      Upvalues(std::move(Captures))
 {
     if (Depth > E.Settings.MaxNesting)
         throw Error("Function nesting exceeds configured limit");
@@ -160,11 +161,12 @@ void Function::BuildDataflow()
     {
         const auto &L = P.Locals[J];
         auto It = std::lower_bound(P.Instructions.begin(), P.Instructions.end(), L.Start,
-                                  [](const Instruction &I, unsigned Pc) { return I.Pc < Pc; });
+                                   [](const Instruction &I, unsigned Pc) { return I.Pc < Pc; });
         if (It == P.Instructions.end())
             continue;
         auto Index = std::size_t(It - P.Instructions.begin());
-        if (ReadSymbols[Index].empty()) continue;
+        if (ReadSymbols[Index].empty())
+            continue;
         auto Root = Find(ReadSymbols[Index][L.Register]);
         if (RootSymbol[Root] == Missing)
             RootSymbol[Root] = LocalSymbols[J];
@@ -294,6 +296,5 @@ void Function::BuildDataflow()
         if (S.Owner == Id && S.Cell)
             S.Category = "Table";
 }
-
 
 } // namespace Taze::Detail

@@ -236,7 +236,7 @@ std::string Function::Closure(const Instruction &I, std::vector<Statement> &Out)
             std::any_of(Nested.P.Instructions.begin(), Nested.P.Instructions.end(), [](const auto &Code)
                         { return Code.B == 0 && (Code.Op == LOP_NAMECALL || Code.Op == LOP_SETTABLEKS || Code.Op == LOP_GETTABLEKS); }))
         {
-            E.Symbols[Nested.Parameters.front()].Base = "Self";
+            E.Symbols[Nested.Parameters.front()].Name = "Self";
             E.Symbols[Nested.Parameters.front()].Original = "Self";
         }
     }
@@ -465,7 +465,7 @@ void Function::Simple(const Instruction &I, std::vector<Statement> &Out)
         unsigned Child = I.Op == LOP_NEWCLOSURE ? P.Children.at(unsigned(I.D)) : P.Constants.at(unsigned(I.D)).Index;
         const auto &FunctionName = E.C.Prototypes[Child].Name;
         if (!FunctionName.empty() &&
-            (E.Symbols[S].Name.starts_with("Value") || (Identifier(FunctionName) && E.Symbols[S].Base == Pascal(FunctionName))))
+            (E.Symbols[S].Name.starts_with("Value") || (Identifier(FunctionName) && E.Symbols[S].Name == Pascal(FunctionName))))
         {
             unsigned Nice = E.New(FunctionName, Id, true, false, false, true);
             E.Rename(S, Nice);
@@ -721,6 +721,5 @@ void Function::Simple(const Instruction &I, std::vector<Statement> &Out)
         throw Unstructured("unhandled control instruction " + OpcodeName(I.Op));
     }
 }
-
 
 } // namespace Taze::Detail
