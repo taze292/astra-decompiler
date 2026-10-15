@@ -1,5 +1,9 @@
 # Validation record
 
+## Astra 0.4 — 2026-10-15
+
+All six suites pass **17,960 checks**, including 216 fenced terminal-loop checks and 3,978 control-flow stress configurations. CameraModule's 20 live variants and eight targets × ten readability configurations compile. Two full client inventories compile every available output with zero fallback: 305/306 and 327/328 scripts; the same script supplies empty bytecode. The controlled Roblox fixture preserves ten returned values. See [the complete Astra validation record](ASTRA_VALIDATION.md) for scope, measurements, and limitations; entries below are historical.
+
 ## ClientLoader lifetime correction — 2026-10-15
 
 All six suites pass **12,230 checks**, including **2,550 stress configurations** and **235 inline-recovery checks**. The actual ClientLoader compiles with fallback disabled and zero reference boxes; clean output shrank from 30,532 to 4,076 bytes. Another 100-script live pass compiled all outputs, and the controlled loader fixture executed equivalently in Roblox. Three unrelated function fallbacks remain in that pass. See [CONTROL_FLOW_AUDIT.md](CONTROL_FLOW_AUDIT.md) for the diagnosis, measurements, options, and limits.
@@ -13,7 +17,7 @@ All six suites pass, totaling **12,020 checks**, including **2,502 differential 
 - All four CTest suites pass: 1,601 core checks, 1,642 pipeline checks, 40 WebSocket checks, and 7 batch CLI checks.
 - New behavior cases cover mutable scalar captures, closed-register reuse, per-iteration closures, nested reference propagation, captured-value snapshots, implicit method receivers, and nested receiver scopes. They run at O0/1/2, D0/2, native/boxed settings, and structured/forced-state-machine modes.
 - Eight direct-bytecode checks cover mutation and recapture after CLOSEUPVALS without a new register write, preserving the detached value independently of compiler-specific instruction shapes.
-- Bridge mocks verify zero installation printing, live replacement of TazeOptions and TazeConfig, per-call isolation, unique recursive lookup, duplicate-descendant explicit paths, duplicate-sibling suppression, escaped names, reconnect/timeout/error behavior, and hook restoration.
+- Bridge mocks verify zero installation printing, live replacement of AstraOptions and AstraConfig, per-call isolation, unique recursive lookup, duplicate-descendant explicit paths, duplicate-sibling suppression, escaped names, reconnect/timeout/error behavior, and hook restoration.
 - Transport checks cover JSON options, duplicate keys, malformed scalars, reserved keys, trailing data, host limits, the exact two-line header, and independent require/GC flags. Legacy protocols remain covered.
 - All six local CameraModule O0–2/D0–2 configurations decompiled with fallback disabled and recompiled successfully. Header-free output remains deterministic; elapsed headers are intentionally variable.
 
@@ -36,7 +40,7 @@ Both Projectile modules had four closing-box assignments before the change. Thei
 
 The final build repeated all eight targets/configurations successfully. PlayerScripts was absent at that point, so the harness used the corresponding StarterPlayerScripts instances; output sizes and zero-box counts were unchanged. The separate CameraModule harness also passed 17 variants and four concurrent header-free comparisons. The final v6 bridge and rebuilt server were left connected.
 
-These live checks **compile** recovered source; they do not execute or replace game modules and do not prove complete semantic equivalence of third-party scripts. Behavioral equivalence is tested on the local executable fixtures. Results remain in `getgenv().TazeReadabilityValidation`; no live game bytecode was exported through MCP into the repository for this follow-up.
+These live checks **compile** recovered source; they do not execute or replace game modules and do not prove complete semantic equivalence of third-party scripts. Behavioral equivalence is tested on the local executable fixtures. Results remain in `getgenv().AstraReadabilityValidation`; no live game bytecode was exported through MCP into the repository for this follow-up.
 
 ## Earlier local 0.3.0 rewrite — 2026-10-14
 
@@ -45,7 +49,7 @@ This section preserves the earlier architecture rewrite's release/session eviden
 - Release build: ClangCL 22.1.3, Windows SDK 10.0.26100; all four CTest suites pass.
 - Existing semantic/format/version suite: **1,593 passed, 0 failed**.
 - New pipeline suite: **1,433 passed, 0 failed**, covering 576 combinations of casing/naming/type names/function spelling/pass count/debug/state-machine mode, plus locator interactions, strict option errors, resource caps, statistics, serial/parallel ordering and failures, and 512 deterministic byte mutations. Mutated bytecode is never executed.
-- WebSocket suite: **30 checks**, retaining legacy/TAZE2 behavior and adding TAZE3 options, bad/duplicate/reserved keys, cap escalation rejection, per-request output limits, and recovery without settings leakage.
+- WebSocket suite: **30 checks**, retaining legacy/ASTRA2 behavior and adding ASTRA3 options, bad/duplicate/reserved keys, cap escalation rejection, per-request output limits, and recovery without settings leakage.
 - Batch CLI: **7 checks** for ordered mixed success/failure, identical results, overwrite policy, preflight collisions, invalid options, and worker caps.
 - Bridge mocks cover all six line-probe modes, cached function restoration, configuration overlay isolation, error inspection/raising, lazy probing, NaN timeouts, pending limits, and timeout recovery.
 
@@ -61,10 +65,10 @@ The four principal benchmark inputs retain byte-identical default output with ze
 - **17** source variants compiled in Roblox, covering every casing/naming pair, disabled comments, zero simplification passes, forced state-machine output, and GC suppression.
 - **4** concurrent requests returned byte-identical default source. Invalid request options failed without affecting the next valid request.
 - All **30** GC expressions compiled/evaluated without error; **28** matched live functions and **2** anonymous prototypes (lines 609/612) returned no function in this session. Lookup metadata does not guarantee a matching live closure.
-- The project behavioral fixture executed before/after decompilation with identical results: `TazeTestResult.Passed = true`.
+- The project behavioral fixture executed before/after decompilation with identical results: `AstraTestResult.Passed = true`.
 - Final server restart, reconnection, and bridge reinstallation succeeded. The final local server and bridge were left available for use.
 
-CameraModule was compiled, not executed or substituted for the camera controller. Its 17 compile checks do not establish complete behavior equivalence. Behavioral assertions apply to executable regression fixtures. The live results are in `TazeRewriteValidation`; bytecode, generated source, measurements, and server logs remain ignored under `artifacts/rewrite/`.
+CameraModule was compiled, not executed or substituted for the camera controller. Its 17 compile checks do not establish complete behavior equivalence. Behavioral assertions apply to executable regression fixtures. The live results are in `AstraRewriteValidation`; bytecode, generated source, measurements, and server logs remain ignored under `artifacts/rewrite/`.
 
 The initial architecture-only commit produced identical output before optimizations were introduced. The final rewrite retains its conservative semantic transformations and fallback; the measured gains come from data structures, graph reuse, final source expansion, deferred naming, and independent chunk concurrency. No claim of universal optimality or support for every Luau program is made.
 
@@ -72,7 +76,7 @@ The initial architecture-only commit produced identical output before optimizati
 
 The final Windows Release build used ClangCL 22.1.3, CMake, and the installed Windows SDK.
 
-`build/Release/taze-tests.exe` reports **1,593 passed, 0 failed**, and CTest passes against the current Luau snapshot. These are individual fixture/configuration, metadata and input-validation checks, not distinct source programs. The suite compares execution results across 55 behavioral fixtures, optimization levels 0–2, stripped/full debug data, structured/fallback emission, versions 9 and 11–14, and plain/Roblox opcode encodings. A dedicated v12/v13 feature-boundary check exercises float and double vector constants rather than changing only the serialized version byte.
+`build/Release/astra-tests.exe` reports **1,593 passed, 0 failed**, and CTest passes against the current Luau snapshot. These are individual fixture/configuration, metadata and input-validation checks, not distinct source programs. The suite compares execution results across 55 behavioral fixtures, optimization levels 0–2, stripped/full debug data, structured/fallback emission, versions 9 and 11–14, and plain/Roblox opcode encodings. A dedicated v12/v13 feature-boundary check exercises float and double vector constants rather than changing only the serialized version byte.
 
 New regression fixtures cover chained enum tests, shared branch suffixes, early returns, mixed boolean precedence, false/nil values, side effects in conditions, loop exits, scoped captures, method installation, field/method evaluation order, naming collisions, and parenthesized call statements. These fixtures explicitly reject state-machine fallback in normal mode. The output for the fixtures is also checked for statement semicolons.
 
@@ -100,7 +104,7 @@ The Windows integration test starts a temporary loopback server and runs **20 tr
 
 The executor bridge was installed through the connected Roblox client. Its replacement `decompile` called `getscriptbytecode` on the authorized CameraModule, sent the result to the C++ server, and returned **25,048 bytes**. Roblox's `loadstring` accepted the returned source, which contained no semicolons. The native executor sends a `ws://127.0.0.1:port` Origin header; this is accepted, while browser HTTP(S) origins are rejected.
 
-The live bridge also recovered after the server process was restarted, restored the original executor function through `TazeBridge.Stop()`, and completed two concurrent CameraModule requests with matching response lengths. It was reinstalled and left connected after validation.
+The live bridge also recovered after the server process was restarted, restored the original executor function through `AstraBridge.Stop()`, and completed two concurrent CameraModule requests with matching response lengths. It was reinstalled and left connected after validation.
 
 ## Formatting and function lookups
 

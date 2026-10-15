@@ -14,7 +14,7 @@ The final six CTest suites pass **12,230 checks**, including **2,550 differentia
 
 In the connected client, **100/100 script outputs compiled**. Three functions still used conservative fallback in HudController, Shared.Mutations, and EventController.Events.Meowl; this follow-up does not claim all structuring cases are solved. A controlled loader/callback fixture also executed in Roblox before and after reconstruction with all seven scalar results equal. Live game modules and ClientLoader were compiled without being executed or required for this validation.
 
-The retained-guard recovery comment is now `-- Uninlined by Taze's Decompiler`; its body's normal line/lookup/upvalue metadata is suppressed. This is separate from ordinary control-flow fallback. See [INLINE_RECOVERY.md](INLINE_RECOVERY.md).
+The retained-guard recovery comment is now `-- Uninlined by Astra`; its body's normal line/lookup/upvalue metadata is suppressed. This is separate from ordinary control-flow fallback. See [INLINE_RECOVERY.md](INLINE_RECOVERY.md).
 
 A 200-sample comparison against saved `ad2d5f6` binaries measured median core times of 1.3133 → 1.2432 ms for a locally compiled reference based on the supplied source, 5.6502 → 5.1263 ms for captured CameraModule, and 9.3296 → 9.0998 ms for the 201-function corpus. The compiled reference is not the live game's original bytecode. Its output shrank from 6,249 to 5,445 bytes. Raw measurements, compiler configurations, build logs, and aggregate live reports are ignored under `artifacts/clientloader/`.
 
@@ -42,7 +42,7 @@ The earlier numbered multiline upvalue block is the default again. `upvalue-inde
 
 ## Inline-call recovery
 
-The retained generic call behind `CMPPROTO` is reconstructed in both output modes and now has a dedicated executable regression suite. Static O2 inlining can erase the callsite completely: the tests demonstrate two distinct source forms producing byte-identical chunks even with function names and line information. Taze retains those inlined computations rather than asserting an original call it cannot establish. See [INLINE_RECOVERY.md](INLINE_RECOVERY.md) for evidence and supported cases.
+The retained generic call behind `CMPPROTO` is reconstructed in both output modes and now has a dedicated executable regression suite. Static O2 inlining can erase the callsite completely: the tests demonstrate two distinct source forms producing byte-identical chunks even with function names and line information. Astra retains those inlined computations rather than asserting an original call it cannot establish. See [INLINE_RECOVERY.md](INLINE_RECOVERY.md) for evidence and supported cases.
 
 ## Validation and limits
 
@@ -102,9 +102,9 @@ Final benchmark CSVs and generated comparisons are under `artifacts/controlflow/
 
 ```powershell
 ./build.ps1 -Test
-./build/Release/taze-control-flow-tests.exe
-./build/Release/taze-control-flow-tests.exe open_method
-./build/Release/taze-inline-recovery-tests.exe
+./build/Release/astra-control-flow-tests.exe
+./build/Release/astra-control-flow-tests.exe open_method
+./build/Release/astra-inline-recovery-tests.exe
 ./tools/BenchmarkCorpus.ps1 -Inputs @('artifacts/rewrite/CameraModule.live.luac', 'artifacts/rewrite/Corpus.luac', 'artifacts/readability/CaptureLifetimes.luac', 'artifacts/controlflow/or20.luac') -BaselineDirectory artifacts/controlflow/baseline -OutputDirectory artifacts/controlflow/final-benchmark -Samples 300
 ./tools/ValidateCorpus.ps1 -BaselineDirectory artifacts/controlflow/baseline -OutputDirectory artifacts/controlflow/final-source-corpus -Samples 150
 ```

@@ -85,7 +85,7 @@ Stage boundaries are introduced before changing behavior. Existing transformatio
 ### 6. Configurable bridge and diagnostics
 
 - Extend the protocol with a bounded, strict option block and retain legacy requests.
-- Support `TazeConfig.Options` plus per-call overrides without restarting the server.
+- Support `AstraConfig.Options` plus per-call overrides without restarting the server.
 - Preserve silent return behavior by default but expose the most recent failure and request timing; offer an explicit raising mode.
 - Avoid path work when require comments are disabled and avoid unnecessary line probing when all lookups are disabled.
 - Add protocol validation, request isolation, compatibility, and mock executor checks. Run actual CameraModule through MCP and compile all selected option variants.

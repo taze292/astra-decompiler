@@ -48,12 +48,12 @@ The Windows server already handled distinct clients on separate threads; that mo
 All payloads are text frames. IDs are 1–16 decimal digits. Hex encoding preserves arbitrary bytecode bytes.
 
 ```text
-RequestId\nTAZE4\nLineField\nHexModulePath\nJsonOptions\nHexBytecode
+RequestId\nASTRA4\nLineField\nHexModulePath\nJsonOptions\nHexBytecode
 ```
 
 The options object is at most 4,096 bytes and contains scalar string, Boolean, or unsigned integer values. Its restricted JSON grammar accepts ASCII option identifiers/enum words, not escapes, nesting, null, or arbitrary expressions. Duplicate, unknown, reserved, and invalid options fail the request. Metadata paths are at most 8,192 decoded bytes. Resource overrides cannot exceed host caps. The server copies its base Options for each request, so overrides cannot leak into other requests.
 
-Legacy raw, TAZE2 metadata, and TAZE3 hex-encoded semicolon options remain supported. Replies remain `RequestId\nok\nSource` or `RequestId\nerror\nMessage`. Bridge v6 requires this server for TAZE4 requests; it does not silently retry against an old server with lost settings.
+Raw requests, ASTRA2 metadata, and ASTRA3 hex-encoded semicolon options remain supported. Replies remain `RequestId\nok\nSource` or `RequestId\nerror\nMessage`. Bridge v7 requires this server for ASTRA4 requests; it does not silently retry against an old server with lost settings. PascalCase fields and CLI aliases normalize before duplicate, reserved-field, and resource-cap checks. Rebuild the server and reinstall the bridge together when migrating to Astra.
 
 ## Development workflow
 

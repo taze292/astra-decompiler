@@ -1,5 +1,9 @@
 # Rewrite measurements
 
+## Astra formatting update — 2026-10-15
+
+Three alternating-order 301-sample runs against `a18b706` measured 4.5969 → 4.8485 ms for captured CameraModule, 8.3119 → 8.3730 ms for the generated corpus, and 1.0935 → 1.0823 ms for the loader guard fixture. The new formatting work has a small measured cost on CameraModule; no universal speedup is claimed. The finalizer retains tokens only inside table constructors and avoids rebuilding unchanged source. See [Astra validation](ASTRA_VALIDATION.md) for methodology, full results, and live checks. Earlier entries describe previous milestones.
+
 ## Whole-game reconstruction follow-up — 2026-10-15
 
 Against `bcf0d4a`, a representative nonlinear predicate case now avoids fallback and decompiles about **2.4 times as fast**. Four alternating-order 300-sample runs also measured small-input regressions: 3.3% on captured CameraModule, 0.7% on the 201-function corpus, 7.2% on the capture fixture, and 6.1% on a linear condition fixture. Additional correctness analysis is not free. The full results and completed zero-fallback live sweep are documented in [UNIVERSAL_CONTROL_FLOW.md](UNIVERSAL_CONTROL_FLOW.md); older entries below describe previous milestones.
@@ -70,7 +74,7 @@ Every output compiles and has zero fallback. Stripped outputs are byte-identical
 
 ## Parallel throughput
 
-`taze-batch-bench` decompiled 64 identical v14 CameraModule inputs per batch, with one warm-up batch and seven measured batches at each worker count. All source/diagnostics matched serial decompilation. Times include batch worker creation/joining, but exclude disk I/O.
+`astra-batch-bench` decompiled 64 identical v14 CameraModule inputs per batch, with one warm-up batch and seven measured batches at each worker count. All source/diagnostics matched serial decompilation. Times include batch worker creation/joining, but exclude disk I/O.
 
 | Workers | Median batch time | Inputs/second |
 | --- | --- | --- |
@@ -112,7 +116,7 @@ Final CameraModule validation on Roblox `0.743.0.7431129` returned 28,079 source
 ./build.ps1 -Test
 ./tools/BenchmarkCorpus.ps1 -Inputs @('artifacts/CameraModule.luac', 'artifacts/rewrite/CameraModule.live.luac', 'artifacts/RobloxFixture.luac', 'artifacts/rewrite/Corpus.luac') -BaselineDirectory artifacts/rewrite/baseline
 ./tools/ValidateCorpus.ps1 -BaselineDirectory artifacts/rewrite/baseline -Samples 100
-./build/Release/taze-batch-bench.exe artifacts/rewrite/CameraModule.live.luac
+./build/Release/astra-batch-bench.exe artifacts/rewrite/CameraModule.live.luac
 ./tools/MeasureMemory.ps1 -InputPath artifacts/rewrite/Corpus.luac -BaselineDirectory artifacts/rewrite/baseline
 ```
 

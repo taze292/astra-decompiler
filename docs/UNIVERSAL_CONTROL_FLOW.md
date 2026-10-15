@@ -28,7 +28,7 @@ After reconnection, the final comment-free sweep on the committed decompiler cov
 
 A second complete sweep with the bridge's normal defaults also passed all 1,192 obtainable scripts with zero fallback, compilation failures, or retries. Headers, line/lookup comments, and numbered multiline upvalue comments were enabled. The compact and default sweeps took 11.28 and 67.05 seconds respectively, including bytecode extraction, path metadata, transport, decompilation, and compilation; these are validation durations, not isolated engine benchmarks.
 
-Final focused requests for `Net.Net`, `Shared.Animals`, and CameraModule also compiled with fallback explicitly disabled. These checks used the same executable SHA-256 as `build/Release/taze.exe`, and the local server remains on that build.
+Final focused requests for `Net.Net`, `Shared.Animals`, and CameraModule also compiled with fallback explicitly disabled. These checks used the same executable SHA-256 as `build/Release/astra.exe`, and the local server remains on that build.
 
 The audit now accepts an empty generated string as valid Luau. `Items.Sarung.SarungScript` contains 37 bytes of bytecode and correctly produces empty source when headers are disabled; the previous audit incorrectly classified that result as an input error. One initial bridge disconnect on `NewShop.UIAnimationsController` passed on retry before the final sweep. The audit records and retries a transport disconnect/send/connection failure at most once per target instead of hiding it.
 
@@ -54,11 +54,11 @@ The nonlinear case changes from fallback to structured source and is about 2.4 t
 
 ```powershell
 ./build.ps1 -Test
-./build/Release/taze-control-flow-tests.exe universal
-./build/Release/taze-control-flow-tests.exe bytecode_threaded
-./build/Release/taze-control-flow-tests.exe bytecode_modified
-./build/Release/taze-control-flow-tests.exe bytecode_predicate_dag_
-./build/Release/taze-control-flow-tests.exe scope_
+./build/Release/astra-control-flow-tests.exe universal
+./build/Release/astra-control-flow-tests.exe bytecode_threaded
+./build/Release/astra-control-flow-tests.exe bytecode_modified
+./build/Release/astra-control-flow-tests.exe bytecode_predicate_dag_
+./build/Release/astra-control-flow-tests.exe scope_
 ```
 
-With the local server and bridge installed, execute `tools/AuditControlFlow.luau` through Roblox MCP. It silently inventories ModuleScripts and LocalScripts in the game and `getscripts()`, excluding CoreGui/CorePackages. Inspect `getgenv().TazeControlFlowAudit` for progress, compilation failures, fallback reasons, input errors, empty outputs, and transport retries. Set `TazeControlFlowAuditOptions = {}` to use the bridge's current defaults; otherwise the audit uses a compact comment-free configuration. Set the report's `Cancelled` field to stop after the current request. Generated game source and bytecode are not added to Git.
+With the local server and bridge installed, execute `tools/AuditControlFlow.luau` through Roblox MCP. It silently inventories ModuleScripts and LocalScripts in the game and `getscripts()`, excluding CoreGui/CorePackages. Inspect `getgenv().AstraControlFlowAudit` for progress, compilation failures, fallback reasons, input errors, empty outputs, and transport retries. Set `AstraControlFlowAuditOptions = {}` to use the bridge's current defaults; otherwise the audit uses a compact comment-free configuration. Set the report's `Cancelled` field to stop after the current request. Generated game source and bytecode are not added to Git.

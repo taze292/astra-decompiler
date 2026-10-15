@@ -4,9 +4,11 @@ The C++ API, CLI, and bridge use the same option parser and validation rules. De
 
 ## Shared options
 
-CLI syntax is `--key value`. Boolean switches also support `--no-key`; `--state-machine` alone means true. In Luau use a table with these exact keys, for example `{ casing = "snake", ["gc-locators"] = false }`. C++ callers can set the field directly or call `Taze::ApplyOption(Options, "casing", "snake")`.
+The Luau bridge uses the readable PascalCase names in the second column, for example `{ Casing = "Snake", IncludeGcLocators = false }`. C++ callers can set those fields directly or call `Astra::ApplyOption(Options, "Casing", "Snake")`. The backend also accepts the CLI names in the first column; aliases resolve before duplicate, reserved-field, and resource-cap validation. The bridge deliberately exposes only the PascalCase schema.
 
-| Key | C++ field | Default | Values / meaning |
+CLI syntax is `--key value`. Boolean switches also support `--no-key`; `--state-machine` alone means true. Enum values are case-insensitive, and `PascalCase`, `camelCase`, and `snake_case` are accepted casing aliases. Names and prefixes remain case-sensitive.
+
+| CLI key | Luau / C++ field | Default | Values / meaning |
 | --- | --- | --- | --- |
 | `encoding` | `Encoding` | `Auto` | `auto`, `plain`, `roblox`; validate the whole instruction stream |
 | `casing` | `Casing` | `Pascal` | `pascal`, `camel`, `snake`, `preserve` |
@@ -19,11 +21,15 @@ CLI syntax is `--key value`. Boolean switches also support `--no-key`; `--state-
 | `infer-calls` | `InferCallNames` | true | Infer service, module, constructor, Connection, and RaycastResult names |
 | `local-prefix` | `LocalPrefix` | `Value` | Prefix for anonymous locals without a selected type name; ASCII identifier, 1–32 characters |
 | `argument-prefix` | `ArgumentPrefix` | `Argument` | Prefix for anonymous parameters; same identifier rules |
-| `indent` | `IndentWidth` | 4 | Spaces per level, 1–16 |
+| `indent` | `IndentWidth` | 4 | Spaces per level, 1–16; ignored for indentation when UseTabs is enabled |
+| `use-tabs` | `UseTabs` | false | Indent with one tab per level |
+| `blank-lines-between-groups` | `BlankLinesBetweenGroups` | 1 | Blank lines between statement groups, 0–3; GroupSpacing=false suppresses them |
+| `space-inside-table-braces` | `SpaceInsideTableBraces` | true | Inline table padding: `{ Value }` versus `{Value}`; strings/comments are untouched |
+| `compact-arrays` | `CompactArrays` | true | Omit proven contiguous numeric prefix keys; retain gaps, nils, overlaps, and unsafe keys |
 | `header` | `IncludeHeader` | true | Two-line generator/version and measured elapsed-time header |
 | `lines` | `IncludeLineComments` | true | Function line comments, including their lookup expressions |
-| `upvalues` | `IncludeUpvalueComments` | true | Copy/Reference capture comments |
-| `compact-upvalues` | `CompactUpvalues` | false | One-line capture list; default is the multiline block |
+| `upvalues` | `IncludeUpvalueComments` | true | Capture comments with lowercase copy/ref kinds |
+| `compact-upvalues` | `CompactUpvalues` | false | One-line capture list; default is separate -- Upvalues / -- [1] Name (copy/ref) lines |
 | `upvalue-indexes` | `IncludeUpvalueIndexes` | true | Show 1-based capture indexes in either comment style |
 | `group-spacing` | `GroupSpacing` | true | Separate statement groups with blank lines |
 | `locators` | `IncludeFunctionLocators` | true | Master switch for both kinds of function lookup |
@@ -44,24 +50,38 @@ Unknown keys, invalid enums, partial numbers such as `2junk`, numeric overflow, 
 
 The legacy `--no-filtergc` switch still disables **both** locator kinds for compatibility. Prefer `--no-gc-locators` to disable only GC comments, or `--no-locators` to disable both.
 
+## Array and spacing rules
+
+With `CompactArrays=true`, a safe explicit prefix such as `{ [1] = "hi", [2] = "bye", [4] = "later" }` becomes `{ "hi", "bye", [4] = "later" }`. The transformation preserves source field order and stops at gaps or nils. Ambiguous computed keys, overlapping duplicates, and call/vararg expansion need additional checks; the decompiler keeps explicit keys wherever equivalence cannot be proved. Set CompactArrays=false for fully explicit reconstructed indices.
+
+UseTabs selects tabs; otherwise IndentWidth supplies 1–16 spaces per level. GroupSpacing and BlankLinesBetweenGroups control statement-group separation. SpaceInsideTableBraces affects inline constructor padding. These controls never rewrite the contents of strings or comments and do not rename table keys.
+
 ## Naming rules
 
 - **Inferred:** prefer debug names, then useful service/module/member hints, then typed or generic numbered names.
 - **Debug:** use available debug local/function names and numbered fallbacks; do not expose inferred service/member names as binding names.
-- **Generic:** number all local bindings and parameters. This overrides original function-name preservation. `type-names=false` makes anonymous local prefixes uniformly Value/value; parameters use Argument/argument.
+- **Generic:** number all local bindings and parameters. This overrides original function-name preservation. `UseTypeNames=false` makes anonymous local prefixes uniformly Value/value; parameters use Argument/argument.
 - **Preserve casing:** retain valid debug/inferred spelling, including underscores. Invalid or erased identifiers still need sanitized/generated names.
 
-Names are allocated after simplification, in deterministic first-reference order. Global names and enclosing bindings are reserved; collisions receive numeric suffixes. Snake casing recognizes acronym boundaries (`HTTPServer` → `http_server`), camel casing gives `httpServer`, and reserved words receive a suffix. Original function names remain unchanged unless `preserve-function-names=false` or generic naming is selected.
+Names are allocated after simplification, in deterministic first-reference order. Global names and enclosing bindings are reserved; collisions receive numeric suffixes. Snake casing recognizes acronym boundaries (`HTTPServer` → `http_server`), camel casing gives `httpServer`, and reserved words receive a suffix. Original function names remain unchanged unless `PreserveFunctionNames=false` or generic naming is selected.
 
-Implicit method receivers always use Luau's required spelling `self`, including in generic naming mode. Disable `method-syntax` to apply ordinary naming to explicit receivers. Method conversion is suppressed where it could shadow a captured outer receiver or a global `self`. Inference does not recover erased source names; it supplies hints from bytecode operations. For example, `Instance.new("Part")` suggests `Part`, event `Connect` suggests `Connection`, and raycasts suggest `RaycastResult`.
+Implicit method receivers always use Luau's required spelling `self`, including in generic naming mode. Set `MethodSyntax=false` to apply ordinary naming to explicit receivers. Method conversion is suppressed where it could shadow a captured outer receiver or a global `self`. Inference does not recover erased source names; it supplies hints from bytecode operations. For example, `Instance.new("Part")` suggests `Part`, event `Connect` suggests `Connection`, and raycasts suggest `RaycastResult`.
 
 ## Comment rules
 
-Upvalues use the original multiline `Upvalues:` block by default. `compact-upvalues=true` uses a one-line list. `upvalue-indexes` controls numbering independently in both styles; `upvalues=false` hides the entire list. For example, `{ ["compact-upvalues"] = true, ["upvalue-indexes"] = false }` produces a compact unnumbered list. Existing global `TazeOptions` tables are preserved on bridge reinstallation, so change their `compact-upvalues` value to false to adopt the new default in an existing session.
+Upvalues use valid line comments by default:
 
-`lines=false` suppresses the entire function line/lookup comment. `locators=false` retains line numbers while hiding lookups. When require lookups are enabled and a reachable, unambiguous export is proven, that lookup takes priority. Otherwise GC is used if enabled. With GC disabled, unresolved functions have only their line number. No dangling separator is emitted.
+```luau
+-- Upvalues
+-- [1] Uv1 (copy)
+-- [2] Uv2 (ref)
+```
 
-A function reconstructed through a retained compiler inline guard has only `-- Uninlined by Taze's Decompiler` as its own metadata comment. Its line, lookup, and upvalue annotations are suppressed regardless of these presentation options. This provenance marker remains with `lines=false`/`upvalues=false`. Ordinary functions inside that body retain their own settings. See [INLINE_RECOVERY.md](INLINE_RECOVERY.md).
+`CompactUpvalues=true` uses a one-line list. `IncludeUpvalueIndexes` controls bracketed numbering independently in both styles; `IncludeUpvalueComments=false` hides the entire list. For example, `{ CompactUpvalues = true, IncludeUpvalueIndexes = false }` produces a compact unnumbered list. Existing `AstraOptions` tables are preserved on reinstallation.
+
+`IncludeLineComments=false` suppresses the entire function line/lookup comment. `IncludeFunctionLocators=false` retains line numbers while hiding lookups. When `IncludeRequireLocators=true` and a reachable, unambiguous export is proven, that lookup takes priority. Otherwise GC is used if `IncludeGcLocators=true`. With GC disabled, unresolved functions have only their line number. No dangling separator is emitted.
+
+A function reconstructed through a retained compiler inline guard has only `-- Uninlined by Astra` as its own metadata comment. Its line, lookup, and upvalue annotations are suppressed regardless of these presentation options. This provenance marker remains with `IncludeLineComments=false` and `IncludeUpvalueComments=false`. Ordinary functions inside that body retain their own settings. See [INLINE_RECOVERY.md](INLINE_RECOVERY.md).
 
 Export analysis is skipped when its output is disabled. It never requires or executes a module. Static export paths can follow nested tables, numeric/quoted keys, directly returned functions, and recognizable constructors/metatables; conflicting writes/returns or unknown mutations prevent a claimed path.
 
@@ -69,20 +89,30 @@ GC lookups use serialized function names, never generated binding names. If both
 
 ## Live bridge configuration
 
-Start the local server, then execute the **local** `tools/Decompile.luau` (bridge v6). The previously published release loader remains pinned to its published version. Installation and requests do not print or warn.
+Start the local server, then execute the **local** `tools/Decompile.luau` (bridge v7). The optional download loader follows the Astra repository's `main` branch after it is renamed and published. Installation and requests do not print or warn. The bridge follows [Volt's WebSocket API](https://docs.voltbz.net/docs/websocket), including binary-message flags and explicit closure of discarded clients.
 
 ```luau
-getgenv().TazeConfig = {
+getgenv().AstraConfig = {
     Url = "ws://127.0.0.1:8877/decompile",
     Timeout = 30,
     MaxPending = 32,
     ErrorMode = "silent", -- or "raise"
 }
-getgenv().TazeOptions = {
-    casing = "camel", naming = "inferred",
-    ["require-locators"] = false, ["gc-locators"] = true,
-    ["method-syntax"] = true, ["native-captures"] = true,
-    ["compact-upvalues"] = true, ["argument-prefix"] = "arg",
+getgenv().AstraOptions = {
+    Casing = "Pascal",
+    Naming = "Inferred",
+    IncludeRequireLocators = false,
+    IncludeGcLocators = true,
+    MethodSyntax = true,
+    NativeCaptures = true,
+    CompactUpvalues = false,
+    IncludeUpvalueIndexes = true,
+    CompactArrays = true,
+    UseTabs = false,
+    IndentWidth = 4,
+    GroupSpacing = true,
+    BlankLinesBetweenGroups = 1,
+    SpaceInsideTableBraces = true,
 }
 -- Execute tools/Decompile.luau after setting installation options.
 ```
@@ -90,12 +120,12 @@ getgenv().TazeOptions = {
 ```luau
 local Camera = game:GetService("StarterPlayer"):FindFirstChild("CameraModule", true)
 local Source = decompile(Camera)
-local Snake = decompile(Camera, { casing = "snake", lines = false })
-local Generic = decompile(Camera, 60, { naming = "generic", ["type-names"] = false })
-local Details = getgenv().TazeBridge.LastRequest
+local Snake = decompile(Camera, { Casing = "Snake", IncludeLineComments = false })
+local Generic = decompile(Camera, 60, { Naming = "Generic", UseTypeNames = false })
+local Details = getgenv().AstraBridge.LastRequest
 ```
 
-Each call snapshots `getgenv().TazeOptions`, then overlays legacy `TazeConfig.Options` and per-call options. These input tables are never mutated. You can edit or replace either global table between requests without reinstalling. The bridge populates TazeOptions with documented presentation defaults when absent; a supplied partial table leaves unspecified fields to the server. The table is serialized as a bounded JSON object in each TAZE4 WebSocket message; no Luau code is evaluated by the server. Resource limits can be reduced per request but never raised above server limits. The bridge has its own fixed 64 MiB bytecode cap. `module-path` and `filter-line` are reserved in option tables; the bridge supplies validated path metadata and probes the executor line field. Probing is skipped when GC lookups are disabled in defaults, and happens lazily if a later call enables them.
+Each call snapshots `getgenv().AstraOptions`, then overlays `AstraConfig.Options` and per-call options. Input tables are never mutated. Edit or replace `AstraOptions` between requests without reinstalling. A replacement `AstraConfig` supplies the next call's `Options` and `ErrorMode`; its transport settings still require reinstallation, as described below. Missing fields use the documented defaults. The table is serialized as a bounded JSON object in each ASTRA4 WebSocket message; the server never evaluates Luau configuration code. Resource limits can be reduced per request but never raised above server limits. The bridge also enforces the smaller of MaxInputBytes and its fixed 64 MiB bytecode cap. ModulePath and FilterLineField are reserved metadata; the bridge supplies their validated values. GC probing is skipped when disabled and performed lazily if a later request enables it.
 
 `Url`, `Timeout`, and `MaxPending` are captured at installation; reinstall to change connection settings. `Options` and `ErrorMode` are read from the current configuration table on each call. `MaxPending` is 1–128. A timeout stops waiting and releases the pending slot; it does not cancel C++ work already running.
 
@@ -104,24 +134,24 @@ Module lookup metadata comes from the live instance hierarchy. The bridge uses d
 The default header is exactly two comments followed by a blank line:
 
 ```luau
--- Decompiled with Taze's Decompiler | Bytecode Version: 14
+-- Decompiled with Astra | Bytecode Version: 14
 -- Time taken: 0.004497s
 ```
 
-Time is measured inside the C++ decompiler from decoding through finalization, in seconds; it excludes WebSocket transfer, Roblox scheduling, and header formatting. `LastRequest.ElapsedSeconds` includes bridge work. Use `header=false` for byte-identical output comparisons and hashes; the generated body remains deterministic.
+Time is measured inside the C++ decompiler from decoding through finalization, in seconds; it excludes WebSocket transfer, Roblox scheduling, and header formatting. `LastRequest.ElapsedSeconds` includes bridge work. Use `IncludeHeader=false` for byte-identical output comparisons and hashes; the generated body remains deterministic.
 
-Failures return nil by default. Inspect `TazeBridge.LastError` and `LastRequest.Succeeded/Error/ElapsedSeconds`; successful calls clear LastError and also report input/output sizes, resolved options, module-path status, GC/require counts, and line field. These fields describe the last completed call, so concurrent callers should use their own returned source. `ErrorMode="raise"` makes failures raise instead. Installation failures still return nil without replacing the original decompiler.
+Failures return nil by default. Inspect `AstraBridge.LastError` and `LastRequest.Succeeded/Error/ElapsedSeconds`; successful calls clear LastError and also report input/output sizes, resolved options, module-path status, GC/require counts, and line field. These fields describe the last completed call, so concurrent callers should use their own returned source. `ErrorMode="raise"` makes failures raise instead. Installation failures still return nil without replacing the original decompiler.
 
-`TazeBridge.Decompile` is a direct entry point. Reinstallation restores old hooks before installing replacements; `TazeBridge.Stop()` disconnects and restores supported cached executor references and the original global. The server processes each socket's requests in order and serves up to eight clients concurrently. A slow request on one socket can delay that socket's later requests.
+`AstraBridge.Decompile` is a direct entry point. Reinstallation restores old hooks before installing replacements; `AstraBridge.Stop()` disconnects and restores supported cached executor references and the original global. The server processes each socket's requests in order and serves up to eight clients concurrently. A slow request on one socket can delay that socket's later requests.
 
 ## CLI and batch controls
 
 `--serve --port N` starts the Windows loopback server. `--disassemble` prints decoded instructions. `--stats` adds decode/reconstruction/finalization timings, instruction/symbol counts, analysis work, and fallback count to stderr for single-file decompilation. It never changes source output.
 
 ```powershell
-./build/Release/taze.exe input.luac --casing snake --no-preserve-function-names -o output.luau
-./build/Release/taze.exe input.luac --no-gc-locators --module-path 'game.Modules.Example' --stats
-./build/Release/taze.exe --batch --jobs 4 --output-dir artifacts/output a.luac b.luac
+./build/Release/astra.exe input.luac --casing snake --no-preserve-function-names -o output.luau
+./build/Release/astra.exe input.luac --no-gc-locators --module-path 'game.Modules.Example' --stats
+./build/Release/astra.exe --batch --jobs 4 --output-dir artifacts/output a.luac b.luac
 ```
 
 Batch worker count is 1 by default, 0 selects up to eight hardware threads, and explicit counts are 1–32. Results and error reporting follow input order. Invalid inputs do not prevent valid files from being written; the process exits nonzero if any fail. Filename collisions and input/output aliases are rejected before creating the output directory. Existing files require `--overwrite`. The CLI retains at most one worker-sized window of inputs/results. Batch mode cannot combine with server mode, disassembly, `--stats`, or `-o`.
