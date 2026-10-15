@@ -1,6 +1,7 @@
 #include "Reconstruction.hpp"
+#include <charconv>
 
-namespace Taze::Detail
+namespace Astra::Detail
 {
 bool Function::Optimize(std::vector<Statement> &Nodes)
 {
@@ -404,6 +405,37 @@ bool Function::Optimize(std::vector<Statement> &Nodes)
         }
     };
     Apply(Nodes);
+    auto Literal = [](const std::string &Text)
+    {
+        if (Text == "nil" || Text == "true" || Text == "false" || Text == "{}")
+            return true;
+        if (!Text.empty() && (Text.front() == '\'' || Text.front() == '"'))
+        {
+            std::size_t End = 1;
+            while (End < Text.size())
+            {
+                if (Text[End] == '\\')
+                    End += 2;
+                else if (Text[End++] == Text.front())
+                    return End == Text.size();
+            }
+            return false;
+        }
+        if (Text.empty() || !(std::isdigit(static_cast<unsigned char>(Text.front())) ||
+                              (Text.front() == '-' && Text.size() > 1 && std::isdigit(static_cast<unsigned char>(Text[1])))))
+            return false;
+        double Number = 0;
+        auto [End, Error] = std::from_chars(Text.data(), Text.data() + Text.size(), Number);
+        return Error == std::errc{} && End == Text.data() + Text.size();
+    };
+    auto StableValue = [&](const std::string &Text, const std::set<unsigned> &Skipped)
+    {
+        if (Literal(Text))
+            return true;
+        auto References = Tokens(Text);
+        return References.size() == 1 && Text == Token(References[0]) && !Skipped.count(References[0]) && !E.Symbols[References[0]].Cell &&
+               !E.Symbols[References[0]].ReferenceAlias;
+    };
     std::function<void(std::vector<Statement> &)> Tables = [&](auto &List)
     {
         for (auto &S : List)
@@ -418,12 +450,14 @@ bool Function::Optimize(std::vector<Statement> &Nodes)
                 continue;
             auto Table = Token(S.Left[0]);
             std::vector<std::string> Fields;
+            std::set<unsigned> Skipped;
             for (std::size_t J = N + 1; J < List.size();)
             {
                 // Independent empty table allocations may be interleaved with
                 // the first writes to this table.
                 if (List[J].Type == Kind::Assign && List[J].Left.size() == 1 && List[J].Text == "{}")
                 {
+                    Skipped.insert(List[J].Left[0]);
                     ++J;
                     continue;
                 }
@@ -439,12 +473,16 @@ bool Function::Optimize(std::vector<Statement> &Nodes)
                 if (Right.find(Table) != std::string::npos)
                     break;
                 auto Key = Text.substr(Table.size(), Equal - Table.size());
-                if (J > N + 1 && (!Tokens(Key).empty() || !Tokens(Right).empty() ||
-                                  std::any_of(Right.begin(), Right.end(), [](unsigned char C) { return std::isalpha(C); })))
+                // Folding into an initializer moves writes before the binding
+                // is assigned. Calls, global reads, and metamethods could
+                // observe that binding through a closure, so only move values
+                // whose evaluation cannot run code or read a mutable capture.
+                if (!StableValue(Right, Skipped))
                     break;
-                if (Key.starts_with('.'))
+                if (Key.starts_with('.') && Identifier(Key.substr(1)))
                     Key.erase(0, 1);
-                else if (!(Key.starts_with('[') && Key.ends_with(']')))
+                else if (!(Key.starts_with('[') && Key.ends_with(']') && Literal(Key.substr(1, Key.size() - 2)) && Key != "[nil]" &&
+                           Key != "[{}]"))
                     break;
                 Fields.push_back(Key + " = " + Right);
                 Changed = true;
@@ -454,7 +492,7 @@ bool Function::Optimize(std::vector<Statement> &Nodes)
             {
                 S.Text = "{\n";
                 for (const auto &F : Fields)
-                    S.Text += std::string(E.Settings.IndentWidth, ' ') + F + ",\n";
+                    S.Text += std::string(E.Settings.UseTabs ? 1 : E.Settings.IndentWidth, E.Settings.UseTabs ? '\t' : ' ') + F + ",\n";
                 S.Text += "}";
             }
             else if (!Fields.empty())
@@ -465,4 +503,4 @@ bool Function::Optimize(std::vector<Statement> &Nodes)
     return Changed;
 }
 
-} // namespace Taze::Detail
+} // namespace Astra::Detail

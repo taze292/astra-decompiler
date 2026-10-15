@@ -7,7 +7,7 @@ int main(int Argc, char **Argv)
 {
     if (Argc < 3)
     {
-        std::cerr << "Usage: taze-compile INPUT.luau OUTPUT.luac [optimization 0..2] [debug 0..2]\n";
+        std::cerr << "Usage: astra-compile INPUT.luau OUTPUT.luac [optimization 0..2] [debug 0..2]\n";
         return 1;
     }
     try

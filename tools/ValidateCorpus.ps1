@@ -14,23 +14,23 @@ foreach ($Optimization in 0..2) {
         $Name = "Camera-O$Optimization-D$DebugLevel"
         $Bytes = Join-Path $OutputDirectory "$Name.luac"
         $Recovered = Join-Path $OutputDirectory "$Name.luau"
-        & "$BuildDirectory/taze-compile.exe" $Source $Bytes $Optimization $DebugLevel
+        & "$BuildDirectory/astra-compile.exe" $Source $Bytes $Optimization $DebugLevel
         if ($LASTEXITCODE) { throw "Compilation failed: $Name" }
-        & "$BuildDirectory/taze.exe" $Bytes --no-header --no-fallback -o $Recovered
+        & "$BuildDirectory/astra.exe" $Bytes --no-header --no-fallback -o $Recovered
         if ($LASTEXITCODE) { throw "Decompilation failed: $Name" }
-        & "$BuildDirectory/taze-compile.exe" $Recovered "$OutputDirectory/$Name.recompiled.luac"
+        & "$BuildDirectory/astra-compile.exe" $Recovered "$OutputDirectory/$Name.recompiled.luac"
         if ($LASTEXITCODE) { throw "Recovered source did not compile: $Name" }
-        $Current = & "$BuildDirectory/taze-bench.exe" $Bytes $Samples
+        $Current = & "$BuildDirectory/astra-bench.exe" $Bytes $Samples
         if ($LASTEXITCODE) { throw "Benchmark failed: $Name" }
         $Current | Set-Content "$OutputDirectory/$Name.csv"
         $Row = $Current | ConvertFrom-Csv
         $Record = [ordered]@{ case = $Name; median_ms = $Row.median_ms; p95_ms = $Row.p95_ms; output_bytes = $Row.output_bytes; fallbacks = $Row.fallbacks }
         if ($BaselineDirectory) {
-            & "$BaselineDirectory/taze.exe" $Bytes --no-header -o "$OutputDirectory/$Name.baseline.luau"
+            & "$BaselineDirectory/astra.exe" $Bytes --no-header -o "$OutputDirectory/$Name.baseline.luau"
             if ($LASTEXITCODE) { throw "Baseline decompilation failed: $Name" }
             $Record.identical_source = (Get-FileHash $Recovered).Hash -eq (Get-FileHash "$OutputDirectory/$Name.baseline.luau").Hash
             if ($RequireIdentical -and -not $Record.identical_source) { throw "Default output changed: $Name" }
-            $Baseline = & "$BaselineDirectory/taze-bench.exe" $Bytes $Samples
+            $Baseline = & "$BaselineDirectory/astra-bench.exe" $Bytes $Samples
             if ($LASTEXITCODE) { throw "Baseline benchmark failed: $Name" }
             $Baseline | Set-Content "$OutputDirectory/$Name.baseline.csv"
             $Before = $Baseline | ConvertFrom-Csv

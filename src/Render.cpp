@@ -1,12 +1,31 @@
 #include "Reconstruction.hpp"
 
-namespace Taze::Detail
+namespace Astra::Detail
 {
+namespace
+{
+std::string Indentation(const Options &Settings, unsigned Level = 1)
+{
+    return std::string(Settings.UseTabs ? Level : Level * Settings.IndentWidth, Settings.UseTabs ? '\t' : ' ');
+}
+
+void SeparateGroups(std::string &Text, const Options &Settings)
+{
+    if (!Settings.GroupSpacing || Text.empty())
+        return;
+    unsigned Newlines = 0;
+    for (auto I = Text.size(); I && Text[I - 1] == '\n'; --I)
+        ++Newlines;
+    if (Newlines <= Settings.BlankLinesBetweenGroups)
+        Text.append(Settings.BlankLinesBetweenGroups + 1 - Newlines, '\n');
+}
+} // namespace
+
 std::string Function::Render(const std::vector<Statement> &Nodes, unsigned Indent, std::set<unsigned> &Declared,
                              const std::set<unsigned> &Hoist)
 {
     std::string Out;
-    std::string Pad(Indent * E.Settings.IndentWidth, ' ');
+    std::string Pad = Indentation(E.Settings, Indent);
     auto Line = [&](const std::string &Text)
     {
         std::size_t Start = 0;
@@ -20,11 +39,7 @@ std::string Function::Render(const std::vector<Statement> &Nodes, unsigned Inden
             Start = End + 1;
         } while (Start < Text.size());
     };
-    auto Separate = [&]()
-    {
-        if (E.Settings.GroupSpacing && !Out.empty() && !Out.ends_with("\n\n"))
-            Out += '\n';
-    };
+    auto Separate = [&]() { SeparateGroups(Out, E.Settings); };
     enum class Group
     {
         None,
@@ -125,7 +140,7 @@ std::string Function::Render(const std::vector<Statement> &Nodes, unsigned Inden
             if (Text.starts_with('('))
             {
                 Line("do");
-                Line(std::string(E.Settings.IndentWidth, ' ') + Text);
+                Line(Indentation(E.Settings) + Text);
                 Line("end");
             }
             else
@@ -161,7 +176,7 @@ std::string Function::Render(const std::vector<Statement> &Nodes, unsigned Inden
                         auto Parts = SplitLogical(Test, Operator);
                         if (Parts.size() < 2)
                             continue;
-                        Test = Join(Parts, "\n" + std::string(E.Settings.IndentWidth, ' ') + std::string(Operator).substr(1));
+                        Test = Join(Parts, "\n" + Indentation(E.Settings) + std::string(Operator).substr(1));
                         break;
                     }
                 Line("if " + Test + " then");
@@ -594,30 +609,29 @@ std::string Function::Generate(bool Main)
             if (Referenced.count(U) && !E.Symbols[U].Parameter)
                 Hoist.insert(U);
     unsigned Indent = Main ? 0 : 1;
-    std::string Pad(Indent * E.Settings.IndentWidth, ' '), Out;
+    std::string Pad = Indentation(E.Settings, Indent), Out;
     if (Main && RecoveredInline)
-        Out += Pad + "-- Uninlined by Taze's Decompiler\n";
+        Out += Pad + "-- Uninlined by Astra\n";
     if (!RecoveredInline && E.Settings.IncludeUpvalueComments && !Upvalues.empty() && E.Settings.CompactUpvalues)
     {
         std::vector<std::string> Names;
         for (unsigned J = 0; J < Upvalues.size(); ++J)
         {
             const auto &U = Upvalues[J];
-            Names.push_back((E.Settings.IncludeUpvalueIndexes ? std::to_string(J + 1) + ": " : "") +
+            Names.push_back((E.Settings.IncludeUpvalueIndexes ? "[" + std::to_string(J + 1) + "] " : "") +
                             (Tokens(U.Value).empty() ? U.Name : Token(Tokens(U.Value).front())) + (U.Reference ? " (ref)" : " (copy)"));
         }
         Out += Pad + "-- Upvalues: " + Join(Names) + "\n";
-        if (E.Settings.GroupSpacing)
-            Out += '\n';
+        SeparateGroups(Out, E.Settings);
     }
     else if (!RecoveredInline && E.Settings.IncludeUpvalueComments && !Upvalues.empty())
     {
-        Out += Pad + "--[[\n" + Pad + std::string(E.Settings.IndentWidth, ' ') + "Upvalues:\n";
+        Out += Pad + "-- Upvalues\n";
         for (unsigned J = 0; J < Upvalues.size(); ++J)
-            Out += Pad + std::string(E.Settings.IndentWidth, ' ') + (E.Settings.IncludeUpvalueIndexes ? std::to_string(J + 1) + ": " : "") +
-                   (Tokens(Upvalues[J].Value).empty() ? Upvalues[J].Name : Token(Tokens(Upvalues[J].Value).front())) + " (type \"" +
-                   (Upvalues[J].Reference ? "Reference" : "Copy") + "\")\n";
-        Out += Pad + "]]\n\n";
+            Out += Pad + "-- " + (E.Settings.IncludeUpvalueIndexes ? "[" + std::to_string(J + 1) + "] " : "") +
+                   (Tokens(Upvalues[J].Value).empty() ? Upvalues[J].Name : Token(Tokens(Upvalues[J].Value).front())) +
+                   (Upvalues[J].Reference ? " (ref)\n" : " (copy)\n");
+        SeparateGroups(Out, E.Settings);
     }
     std::vector<std::string> Hoisted;
     for (auto U : Hoist)
@@ -654,10 +668,10 @@ std::string Function::Generate(bool Main)
         Declared.insert(TopSymbol);
     }
     bool FollowsLocals = !Nodes.empty() && Nodes.front().Type == Kind::Assign && !Nodes.front().Text.starts_with("function(");
-    if (!Out.empty() && !Out.ends_with("\n\n") && !FollowsLocals)
-        Out += '\n';
+    if (!FollowsLocals)
+        SeparateGroups(Out, E.Settings);
     Out += Render(Nodes, Indent, Declared, Hoist);
     return Out;
 }
 
-} // namespace Taze::Detail
+} // namespace Astra::Detail

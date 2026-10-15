@@ -1,8 +1,8 @@
 #pragma once
 
-#include "Taze/Decompiler.hpp"
+#include "Astra/Decompiler.hpp"
 
-namespace Taze
+namespace Astra
 {
 int ServeWebSocket(unsigned Port, const Options &Settings);
 }

@@ -14,7 +14,7 @@ struct PredicateDagFixture
 };
 
 // Run the integrated VM round-trip corpus with:
-//   build/Release/taze-control-flow-tests.exe bytecode_predicate_dag_
+//   build/Release/astra-control-flow-tests.exe bytecode_predicate_dag_
 // The independent oracle walks graph edges directly; it does not repeat any
 // decompiler expression-rewrite rules. __eq records every comparison visit, so
 // evaluating a predicate twice or in a different order changes the result.

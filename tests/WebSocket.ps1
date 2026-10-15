@@ -95,25 +95,33 @@ try {
     $Module = Fixture 'module' 'local M={}; function M.Read() return 17 end; return M'
     $Socket = Connect-Bridge
     $JsonOptions = '{"casing":"snake","header":true,"require-locators":false,"gc-locators":true}'
-    Send-Text $Socket ("90`nTAZE4`nLine`n`n$JsonOptions`n" + $Module.Hex)
+    Send-Text $Socket ("90`nASTRA4`nLine`n`n$JsonOptions`n" + $Module.Hex)
     $JsonReply = Receive-Text $Socket
-    Check ($JsonReply.Contains("-- Decompiled with Taze's Decompiler | Bytecode Version:") -and $JsonReply.Contains('-- Time taken: ') -and $JsonReply.Contains(' | filtergc(') -and -not $JsonReply.Contains(' | require(')) 'JSON table options/header failed'
+    Check ($JsonReply.Contains("-- Decompiled with Astra | Bytecode Version:") -and $JsonReply.Contains('-- Time taken: ') -and $JsonReply.Contains(' | filtergc(') -and -not $JsonReply.Contains(' | require(')) 'JSON table options/header failed'
+    $PascalOptions = '{"Casing":"Snake","IncludeHeader":true,"IncludeRequireLocators":false,"IncludeGcLocators":true,"CompactArrays":true,"UseTabs":true,"BlankLinesBetweenGroups":2,"SpaceInsideTableBraces":false}'
+    Send-Text $Socket ("92`nASTRA4`nLine`n`n$PascalOptions`n" + $Module.Hex)
+    $PascalReply = Receive-Text $Socket
+    Check ($PascalReply.StartsWith("92`nok`n") -and $PascalReply.Contains("-- Decompiled with Astra | Bytecode Version:") -and $PascalReply.Contains("`treturn")) 'PascalCase option table/spacing failed'
+    foreach ($Bad in @('{"IncludeHeader":true,"header":false}', '{"ModulePath":"game"}', '{"FilterLineField":"Line"}', '{"MaxAnalysisWork":64000000}', '{"MaxOutputBytes":268435456}', '{"BlankLinesBetweenGroups":4}', '{"compactArrays":true}')) {
+        Send-Text $Socket ("93`nASTRA4`nLine`n`n$Bad`n" + $Small.Hex)
+        Check ((Receive-Text $Socket).StartsWith("93`nerror`n")) "Invalid PascalCase/alias options accepted: $Bad"
+    }
     foreach ($Bad in @('{"header":true,"header":false}', '{"indent":2junk}', '{"indent":02}', '{"unknown":true}', '{"header":false,}', '{"header":false}junk', '{"header":[]}', '{"module-path":"game"}', '{"max-analysis-work":64000000}')) {
-        Send-Text $Socket ("91`nTAZE4`nLine`n`n$Bad`n" + $Small.Hex)
+        Send-Text $Socket ("91`nASTRA4`nLine`n`n$Bad`n" + $Small.Hex)
         Check ((Receive-Text $Socket).StartsWith("91`nerror`n")) "Invalid JSON options accepted: $Bad"
     }
     function Option-Hex([string]$Text) { [BitConverter]::ToString([Text.Encoding]::ASCII.GetBytes($Text)).Replace('-', '') }
     $OptionHex = Option-Hex 'casing=snake;header=false;gc-locators=false;require-locators=false'
-    Send-Text $Socket ("100`nTAZE3`nLine`n`n$OptionHex`n" + $Module.Hex)
+    Send-Text $Socket ("100`nASTRA3`nLine`n`n$OptionHex`n" + $Module.Hex)
     $Configured = Receive-Text $Socket
-    Check ($Configured.StartsWith("100`nok`n") -and -not $Configured.Contains('Decompiled by Taze') -and -not $Configured.Contains(' | ')) 'Per-request options failed'
+    Check ($Configured.StartsWith("100`nok`n") -and -not $Configured.Contains('Decompiled by Astra') -and -not $Configured.Contains(' | ')) 'Per-request options failed'
     foreach ($Bad in @('casing=invalid', 'indent=2junk', 'header=true;header=false', 'module-path=game', 'max-output-bytes=268435456', 'max-analysis-work=64000000', 'header=false;', 'unknown=true')) {
         $BadHex = Option-Hex $Bad
-        Send-Text $Socket ("101`nTAZE3`nLine`n`n$BadHex`n" + $Small.Hex)
+        Send-Text $Socket ("101`nASTRA3`nLine`n`n$BadHex`n" + $Small.Hex)
         Check ((Receive-Text $Socket).StartsWith("101`nerror`n")) "Invalid request options accepted: $Bad"
     }
     $OptionHex = Option-Hex 'max-output-bytes=1'
-    Send-Text $Socket ("102`nTAZE3`nLine`n`n$OptionHex`n" + $Small.Hex)
+    Send-Text $Socket ("102`nASTRA3`nLine`n`n$OptionHex`n" + $Small.Hex)
     Check ((Receive-Text $Socket).StartsWith("102`nerror`n")) 'Per-request output cap ignored'
     Send-Text $Socket ("1`n" + $Small.Hex)
     Check ((Receive-Text $Socket) -ceq ("1`nok`n" + $Small.Source)) 'WebSocket output differs from CLI output'
@@ -127,14 +135,14 @@ try {
     Check ((Receive-Text $Socket).StartsWith("4`nerror`n")) 'Invalid bytecode should return a request error'
     $ModulePath = 'game.ReplicatedStorage.Test'
     $PathHex = [BitConverter]::ToString([Text.Encoding]::ASCII.GetBytes($ModulePath)).Replace('-', '')
-    Send-Text $Socket ("40`nTAZE2`nStartLine`n$PathHex`n" + $Module.Hex)
+    Send-Text $Socket ("40`nASTRA2`nStartLine`n$PathHex`n" + $Module.Hex)
     $Reply = Receive-Text $Socket
     Check ($Reply.StartsWith("40`nok`n") -and $Reply.Contains(' | require(game.ReplicatedStorage.Test).Read')) 'Module metadata was not applied'
-    Send-Text $Socket ("41`nTAZE2`nStartLine`n`n" + $Module.Hex)
+    Send-Text $Socket ("41`nASTRA2`nStartLine`n`n" + $Module.Hex)
     Check ((Receive-Text $Socket).Contains('filtergc("function", { StartLine =')) 'StartLine metadata was not applied'
-    Send-Text $Socket ("42`nTAZE2`nWrongField`n`n" + $Module.Hex)
+    Send-Text $Socket ("42`nASTRA2`nWrongField`n`n" + $Module.Hex)
     Check ((Receive-Text $Socket).StartsWith("42`nerror`n")) 'Unknown line field was accepted'
-    Send-Text $Socket ("43`nTAZE2`nLine`n0a`n" + $Module.Hex)
+    Send-Text $Socket ("43`nASTRA2`nLine`n0a`n" + $Module.Hex)
     Check ((Receive-Text $Socket).StartsWith("43`nerror`n")) 'Multiline module-path injection was accepted'
     Send-Text $Socket ("5`n" + $Large.Hex)
     Check ((Receive-Text $Socket) -ceq ("5`nok`n" + $Large.Source)) '64-bit frame length or large response failed'

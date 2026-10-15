@@ -1,6 +1,6 @@
 #include "Reconstruction.hpp"
 
-namespace Taze::Detail
+namespace Astra::Detail
 {
 unsigned Function::SymbolAt(unsigned R, unsigned Pc, bool Write) const
 {
@@ -276,7 +276,7 @@ std::string Function::Closure(const Instruction &I, std::vector<Statement> &Out)
     std::string Body = Nested.Generate();
     std::string Text = "function" + Nested.Signature();
     if (Nested.RecoveredInline)
-        Text += " -- Uninlined by Taze's Decompiler";
+        Text += " -- Uninlined by Astra";
     else if (E.Settings.IncludeLineComments)
     {
         Text += " -- Line: " + (E.C.Prototypes[Child].Line ? std::to_string(E.C.Prototypes[Child].Line) : "Unknown");
@@ -354,6 +354,7 @@ std::string Function::Condition(const Instruction &I) const
 
 void Function::Simple(const Instruction &I, std::vector<Statement> &Out)
 {
+    auto Indent = [&]() { return std::string(E.Settings.UseTabs ? 1 : E.Settings.IndentWidth, E.Settings.UseTabs ? '\t' : ' '); };
     auto R = [&](unsigned Reg) { return Read(Reg, I.Pc); };
     auto Emit = [&](std::string Text) { Out.push_back({Kind::Raw, {}, std::move(Text)}); };
     auto Set = [&](std::string Text, bool Pure = false, bool Call = false) { Out.push_back(Assign(I.A, I, std::move(Text), Pure, Call)); };
@@ -585,8 +586,8 @@ void Function::Simple(const Instruction &I, std::vector<Statement> &Out)
             for (unsigned J = Start; J < P.Stack; ++J)
                 Emit("if " + Token(TopSymbol) + " > " + std::to_string(J) + " then " + Token(Arguments) + "[" +
                      std::to_string(J - Start + 1) + "] = " + R(J) + " end");
-            Emit("for " + TupleIndex + " = 1, " + Token(PackSymbol) + ".n do\n    " + Token(Arguments) + "[" + Token(TopSymbol) + " - " +
-                 std::to_string(Start) + " + " + TupleIndex + "] = " + Token(PackSymbol) + "[" + TupleIndex + "]\nend");
+            Emit("for " + TupleIndex + " = 1, " + Token(PackSymbol) + ".n do\n" + Indent() + Token(Arguments) + "[" + Token(TopSymbol) +
+                 " - " + std::to_string(Start) + " + " + TupleIndex + "] = " + Token(PackSymbol) + "[" + TupleIndex + "]\nend");
             Args.push_back("table.unpack(" + Token(Arguments) + ", 1, " + Token(TopSymbol) + " - " + std::to_string(Start) + " + " +
                            Token(PackSymbol) + ".n)");
         }
@@ -685,8 +686,8 @@ void Function::Simple(const Instruction &I, std::vector<Statement> &Out)
             for (unsigned J = I.A; J < P.Stack; ++J)
                 Emit("if " + Token(TopSymbol) + " > " + std::to_string(J) + " then " + Token(ReturnValues) + "[" +
                      std::to_string(J - I.A + 1) + "] = " + R(J) + " end");
-            Emit("for " + TupleIndex + " = 1, " + Token(PackSymbol) + ".n do\n    " + Token(ReturnValues) + "[" + Token(TopSymbol) + " - " +
-                 std::to_string(I.A) + " + " + TupleIndex + "] = " + Token(PackSymbol) + "[" + TupleIndex + "]\nend");
+            Emit("for " + TupleIndex + " = 1, " + Token(PackSymbol) + ".n do\n" + Indent() + Token(ReturnValues) + "[" + Token(TopSymbol) +
+                 " - " + std::to_string(I.A) + " + " + TupleIndex + "] = " + Token(PackSymbol) + "[" + TupleIndex + "]\nend");
             Values.push_back("table.unpack(" + Token(ReturnValues) + ", 1, " + Token(TopSymbol) + " - " + std::to_string(I.A) + " + " +
                              Token(PackSymbol) + ".n)");
         }
@@ -778,7 +779,7 @@ void Function::Simple(const Instruction &I, std::vector<Statement> &Out)
             for (unsigned J = I.B; J < unsigned(Base); ++J)
                 Emit(R(I.A) + "[" + std::to_string(I.Aux + J - I.B) + "] = " + R(J));
             auto TupleIndex = Token(E.New("TupleIndex", Id, true, true));
-            Emit("for " + TupleIndex + " = 1, " + Token(PackSymbol) + ".n do\n    " + R(I.A) + "[" +
+            Emit("for " + TupleIndex + " = 1, " + Token(PackSymbol) + ".n do\n" + Indent() + R(I.A) + "[" +
                  std::to_string(I.Aux + unsigned(Base) - I.B - 1) + " + " + TupleIndex + "] = " + Token(PackSymbol) + "[" + TupleIndex +
                  "]\nend");
         }
@@ -790,7 +791,7 @@ void Function::Simple(const Instruction &I, std::vector<Statement> &Out)
             for (unsigned J = I.B; J < P.Stack; ++J)
                 Emit("if " + Token(TopSymbol) + " > " + std::to_string(J) + " then " + R(I.A) + "[" + std::to_string(I.Aux + J - I.B) +
                      "] = " + R(J) + " end");
-            Emit("for " + TupleIndex + " = 1, " + Token(PackSymbol) + ".n do\n    " + R(I.A) + "[" + std::to_string(I.Aux) + " + " +
+            Emit("for " + TupleIndex + " = 1, " + Token(PackSymbol) + ".n do\n" + Indent() + R(I.A) + "[" + std::to_string(I.Aux) + " + " +
                  Token(TopSymbol) + " - " + std::to_string(I.B) + " + " + TupleIndex + " - 1] = " + Token(PackSymbol) + "[" + TupleIndex +
                  "]\nend");
         }
@@ -822,4 +823,4 @@ void Function::Simple(const Instruction &I, std::vector<Statement> &Out)
     }
 }
 
-} // namespace Taze::Detail
+} // namespace Astra::Detail

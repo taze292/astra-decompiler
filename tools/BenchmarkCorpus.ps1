@@ -11,17 +11,17 @@ New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 $Rows = @()
 foreach ($InputPath in $Inputs) {
     $Name = [IO.Path]::GetFileNameWithoutExtension($InputPath)
-    $BeforeText = & "$BaselineDirectory/taze-bench.exe" $InputPath $Samples
+    $BeforeText = & "$BaselineDirectory/astra-bench.exe" $InputPath $Samples
     if ($LASTEXITCODE) { throw "Baseline failed: $InputPath" }
-    $AfterText = & "$BuildDirectory/taze-bench.exe" $InputPath $Samples
+    $AfterText = & "$BuildDirectory/astra-bench.exe" $InputPath $Samples
     if ($LASTEXITCODE) { throw "Current benchmark failed: $InputPath" }
     $BeforeText | Set-Content "$OutputDirectory/$Name.before.csv"
     $AfterText | Set-Content "$OutputDirectory/$Name.after.csv"
     $Before = $BeforeText | ConvertFrom-Csv
     $After = $AfterText | ConvertFrom-Csv
-    & "$BaselineDirectory/taze.exe" $InputPath --no-header -o "$OutputDirectory/$Name.before.luau"
+    & "$BaselineDirectory/astra.exe" $InputPath --no-header -o "$OutputDirectory/$Name.before.luau"
     if ($LASTEXITCODE) { throw "Baseline source failed: $InputPath" }
-    & "$BuildDirectory/taze.exe" $InputPath --no-header -o "$OutputDirectory/$Name.after.luau"
+    & "$BuildDirectory/astra.exe" $InputPath --no-header -o "$OutputDirectory/$Name.after.luau"
     if ($LASTEXITCODE) { throw "Current source failed: $InputPath" }
     $Identical = (Get-FileHash "$OutputDirectory/$Name.before.luau").Hash -eq (Get-FileHash "$OutputDirectory/$Name.after.luau").Hash
     if ($RequireIdentical -and -not $Identical) { throw "Default source changed: $InputPath" }

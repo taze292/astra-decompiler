@@ -1,8 +1,230 @@
 #include "Reconstruction.hpp"
 #include <charconv>
 
-namespace Taze::Detail
+namespace Astra::Detail
 {
+namespace
+{
+struct SourceToken
+{
+    std::size_t Begin, End;
+    std::string_view Text;
+};
+
+// Formatting works on source tokens, never on string contents or comments.
+// The final pass also covers constant-table templates and helper tables that
+// do not pass through the statement optimizer.
+std::string FormatTables(std::string Source, const Options &Settings)
+{
+    if (Source.find('{') == std::string::npos)
+        return Source;
+    std::vector<SourceToken> Tokens;
+    auto LongEnd = [&](std::size_t Begin) -> std::size_t
+    {
+        if (Source[Begin] != '[')
+            return Begin;
+        auto Pos = Begin + 1;
+        while (Pos < Source.size() && Source[Pos] == '=')
+            ++Pos;
+        if (Pos == Source.size() || Source[Pos] != '[')
+            return Begin;
+        auto Close = "]" + std::string(Pos - Begin - 1, '=') + "]";
+        auto End = Source.find(Close, Pos + 1);
+        return End == std::string::npos ? Source.size() : End + Close.size();
+    };
+    unsigned BraceDepth = 0;
+    for (std::size_t Pos = 0; Pos < Source.size();)
+    {
+        if (std::isspace(static_cast<unsigned char>(Source[Pos])))
+        {
+            ++Pos;
+            continue;
+        }
+        if (Source.compare(Pos, 2, "--") == 0)
+        {
+            auto End = Pos + 2 < Source.size() ? LongEnd(Pos + 2) : Pos + 2;
+            if (End == Pos + 2)
+            {
+                End = Source.find('\n', Pos + 2);
+                if (End == std::string::npos)
+                    End = Source.size();
+            }
+            Pos = End;
+            continue;
+        }
+        auto Begin = Pos++;
+        if (Source[Begin] == '\'' || Source[Begin] == '"')
+        {
+            while (Pos < Source.size())
+            {
+                if (Source[Pos] == '\\')
+                    Pos = std::min(Pos + 2, Source.size());
+                else if (Source[Pos++] == Source[Begin])
+                    break;
+            }
+        }
+        else if (auto End = LongEnd(Begin); End != Begin)
+            Pos = End;
+        else if (std::isalnum(static_cast<unsigned char>(Source[Begin])) || Source[Begin] == '_')
+            while (Pos < Source.size() && (std::isalnum(static_cast<unsigned char>(Source[Pos])) || Source[Pos] == '_'))
+                ++Pos;
+        auto Text = std::string_view(Source).substr(Begin, Pos - Begin);
+        if (Text == "{")
+            ++BraceDepth;
+        // Statements outside constructors cannot affect field boundaries.
+        // Keep scanning them lexically to distinguish actual braces from
+        // literals/comments, but retain only tokens needed by table edits.
+        if (BraceDepth)
+            Tokens.push_back({Begin, Pos, Text});
+        if (Text == "}" && BraceDepth)
+            --BraceDepth;
+    }
+    if (Tokens.empty())
+        return Source;
+    struct Edit
+    {
+        std::size_t Begin, End;
+        std::string Text;
+        bool Before = false;
+    };
+    struct Table
+    {
+        std::size_t Open, Close;
+        std::vector<std::pair<std::size_t, std::size_t>> Fields;
+        bool Function = false;
+    };
+    std::vector<Edit> Edits;
+    std::vector<std::size_t> Stack, TableStack;
+    std::vector<Table> Tables;
+    for (std::size_t I = 0; I < Tokens.size(); ++I)
+    {
+        auto Text = Tokens[I].Text;
+        if (Text == "function")
+            for (auto T : TableStack)
+                Tables[T].Function = true;
+        if (Text == "{" || Text == "(" || Text == "[")
+        {
+            Stack.push_back(I);
+            if (Text == "{")
+            {
+                TableStack.push_back(Tables.size());
+                Tables.push_back({I, I, {{I + 1, I + 1}}});
+            }
+        }
+        else if ((Text == "," || Text == ";") && !Stack.empty() && Tokens[Stack.back()].Text == "{")
+        {
+            auto &T = Tables[TableStack.back()];
+            T.Fields.back().second = I;
+            T.Fields.push_back({I + 1, I + 1});
+        }
+        else if ((Text == "}" || Text == ")" || Text == "]") && !Stack.empty())
+        {
+            if (Text == "}" && Tokens[Stack.back()].Text == "{")
+            {
+                auto &T = Tables[TableStack.back()];
+                T.Close = I;
+                T.Fields.back().second = I;
+                if (T.Fields.back().first == I)
+                    T.Fields.pop_back();
+                TableStack.pop_back();
+            }
+            Stack.pop_back();
+        }
+    }
+    auto InlineGap = [&](std::size_t Begin, std::size_t End)
+    {
+        for (auto I = Begin; I < End; ++I)
+            if (Source[I] != ' ' && Source[I] != '\t')
+                return false;
+        return true;
+    };
+    for (const auto &T : Tables)
+    {
+        if (T.Close <= T.Open + 1)
+            continue;
+        const auto &Open = Tokens[T.Open], &Close = Tokens[T.Close];
+        auto Padding = Settings.SpaceInsideTableBraces ? " " : "";
+        if (InlineGap(Open.End, Tokens[T.Open + 1].Begin) && Source.compare(Open.End, Tokens[T.Open + 1].Begin - Open.End, Padding) != 0)
+            Edits.push_back({Open.End, Tokens[T.Open + 1].Begin, Padding});
+        if (InlineGap(Tokens[T.Close - 1].End, Close.Begin) &&
+            Source.compare(Tokens[T.Close - 1].End, Close.Begin - Tokens[T.Close - 1].End, Padding) != 0)
+            Edits.push_back({Tokens[T.Close - 1].End, Close.Begin, Padding});
+        if (!Settings.CompactArrays || T.Function)
+            continue;
+        auto NumericKey = [&](std::size_t Begin, std::size_t End, unsigned &Index)
+        {
+            if (End < Begin + 5 || Tokens[Begin].Text != "[" || Tokens[Begin + 2].Text != "]" || Tokens[Begin + 3].Text != "=")
+                return false;
+            auto Text = Tokens[Begin + 1].Text;
+            auto [Last, Error] = std::from_chars(Text.data(), Text.data() + Text.size(), Index);
+            return Error == std::errc{} && Last == Text.data() + Text.size();
+        };
+        std::size_t Prefix = 0;
+        for (auto [Begin, End] : T.Fields)
+        {
+            unsigned Index = 0;
+            if (!NumericKey(Begin, End, Index) || Index != Prefix + 1 ||
+                Source.substr(Tokens[Begin].Begin, Tokens[Begin + 4].Begin - Tokens[Begin].Begin).find("--") != std::string::npos ||
+                Unwrap(Source.substr(Tokens[Begin + 4].Begin, Tokens[End - 1].End - Tokens[Begin + 4].Begin)) == "nil")
+                break;
+            ++Prefix;
+        }
+        if (!Prefix)
+            continue;
+        bool Safe = true;
+        // Luau can flush list fields after keyed fields. A later duplicate or
+        // unknown key could therefore change the last write to a compacted
+        // index. Existing list fields also have their own implicit numbering.
+        for (auto [Begin, End] : T.Fields)
+        {
+            unsigned Index = 0;
+            if (NumericKey(Begin, End, Index))
+            {
+                if (Begin >= T.Fields[Prefix - 1].second && Index >= 1 && Index <= Prefix)
+                    Safe = false;
+            }
+            else if (End >= Begin + 3 && Tokens[Begin + 1].Text == "=" && Identifier(Tokens[Begin].Text))
+                continue;
+            else if (End >= Begin + 5 && Tokens[Begin].Text == "[" && Tokens[Begin + 2].Text == "]" && Tokens[Begin + 3].Text == "=" &&
+                     !Tokens[Begin + 1].Text.empty() && (Tokens[Begin + 1].Text.front() == '\'' || Tokens[Begin + 1].Text.front() == '"'))
+                continue;
+            else
+                Safe = false;
+        }
+        if (!Safe)
+            continue;
+        for (std::size_t N = 0; N < Prefix; ++N)
+        {
+            auto [Begin, End] = T.Fields[N];
+            auto ValueBegin = Tokens[Begin + 4].Begin, ValueEnd = Tokens[End - 1].End;
+            // An explicit keyed field always consumes one result. A final
+            // positional call or vararg must keep that single-result contract.
+            bool Single = Tokens[End - 1].Text == ")" || std::string_view(Source).substr(ValueBegin, ValueEnd - ValueBegin) == "...";
+            Edits.push_back({Tokens[Begin].Begin, ValueBegin, Single ? "(" : ""});
+            if (Single)
+                Edits.push_back({ValueEnd, ValueEnd, ")", true});
+        }
+    }
+    if (Edits.empty())
+        return Source;
+    std::stable_sort(Edits.begin(), Edits.end(),
+                     [](const Edit &A, const Edit &B) { return A.Begin != B.Begin ? A.Begin < B.Begin : A.Before > B.Before; });
+    std::string Out;
+    Out.reserve(Source.size());
+    std::size_t Pos = 0;
+    for (const auto &E : Edits)
+    {
+        if (E.Begin < Pos)
+            continue;
+        Out.append(Source, Pos, E.Begin - Pos);
+        Out += E.Text;
+        Pos = E.End;
+    }
+    Out.append(Source, Pos, Source.size() - Pos);
+    return Out;
+}
+} // namespace
+
 Engine::Engine(const Chunk &Bytecode, const Options &Options) : C(Bytecode), Settings(Options), Analysis{Options.MaxAnalysisWork}
 {
     // A generated local must never shadow an original global, even when PascalCase changes a debug name.
@@ -151,7 +373,7 @@ std::string Engine::Resolve(std::string Text)
         Append(Symbol ? Symbols.at(Id).Name : Lookups.at(Id));
         Pos = End + 1;
     }
-    return Output;
+    return FormatTables(std::move(Output), Settings);
 }
 void Engine::Budget(std::size_t Amount)
 {
@@ -160,4 +382,4 @@ void Engine::Budget(std::size_t Amount)
         throw Error("Source reconstruction exceeds output/work limit");
 }
 
-} // namespace Taze::Detail
+} // namespace Astra::Detail

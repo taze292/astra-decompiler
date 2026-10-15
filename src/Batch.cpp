@@ -1,9 +1,9 @@
-#include "Taze/Decompiler.hpp"
+#include "Astra/Decompiler.hpp"
 #include <algorithm>
 #include <atomic>
 #include <thread>
 
-namespace Taze
+namespace Astra
 {
 std::vector<BatchResult> DecompileBatch(std::span<const std::string_view> Inputs, const Options &Settings, unsigned Workers)
 {
@@ -42,4 +42,4 @@ std::vector<BatchResult> DecompileBatch(std::span<const std::string_view> Inputs
     }
     return Results;
 }
-} // namespace Taze
+} // namespace Astra

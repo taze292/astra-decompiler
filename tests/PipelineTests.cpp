@@ -1,5 +1,7 @@
+#include "Astra/Decompiler.hpp"
+#include "AstraOutputCases.hpp"
 #include "Luau/Compiler.h"
-#include "Taze/Decompiler.hpp"
+#include "TerminalLoopCases.hpp"
 #include "lua.h"
 #include "lualib.h"
 #include <functional>
@@ -22,12 +24,12 @@ void Reject(const std::function<void()> &Action)
     {
         Action();
     }
-    catch (const Taze::Error &)
+    catch (const Astra::Error &)
     {
         ++Passed;
         return;
     }
-    throw std::runtime_error("Expected a Taze::Error");
+    throw std::runtime_error("Expected an Astra::Error");
 }
 std::string Execute(const std::string &Bytes)
 {
@@ -68,6 +70,8 @@ int main()
 {
     try
     {
+        RunAstraOutputCases(Check, Execute);
+        RunTerminalLoopCases(Check);
         const char *Source = R"(
 local HTTPServer = 3
 local user_value = 5
@@ -92,21 +96,21 @@ return answer, text, count, x, y, recurse(5), string.upper("literal"), callbacks
             auto Bytes = Luau::compile(Source, Compiler);
             auto Expected = Execute(Bytes);
             for (auto Casing :
-                 {Taze::VariableCase::Pascal, Taze::VariableCase::Camel, Taze::VariableCase::Snake, Taze::VariableCase::Preserve})
-                for (auto Naming : {Taze::VariableNaming::Inferred, Taze::VariableNaming::Debug, Taze::VariableNaming::Generic})
+                 {Astra::VariableCase::Pascal, Astra::VariableCase::Camel, Astra::VariableCase::Snake, Astra::VariableCase::Preserve})
+                for (auto Naming : {Astra::VariableNaming::Inferred, Astra::VariableNaming::Debug, Astra::VariableNaming::Generic})
                     for (bool Types : {false, true})
                         for (bool Preserve : {false, true})
                             for (unsigned Passes : {0u, 1u, 5u})
                                 for (bool Machine : {false, true})
                                 {
-                                    Taze::Options S;
+                                    Astra::Options S;
                                     S.Casing = Casing;
                                     S.Naming = Naming;
                                     S.UseTypeNames = Types;
                                     S.PreserveFunctionNames = Preserve;
                                     S.OptimizationPasses = Passes;
                                     S.ForceStateMachine = Machine;
-                                    auto Actual = Taze::Decompile(Bytes, S);
+                                    auto Actual = Astra::Decompile(Bytes, S);
                                     try
                                     {
                                         Check(Execute(Luau::compile(Actual.Source)) == Expected, "Changed execution result");
@@ -143,16 +147,16 @@ return answer, text, count, x, y, recurse(5), string.upper("literal"), callbacks
                             C.optimizationLevel = Level;
                             C.debugLevel = Symbols;
                             auto Input = Luau::compile(Fixture, C);
-                            Taze::Options O;
+                            Astra::Options O;
                             O.NativeCaptures = Native;
                             O.ForceStateMachine = Machine;
-                            auto Output = Taze::Decompile(Input, O);
+                            auto Output = Astra::Decompile(Input, O);
                             Check(Execute(Luau::compile(Output.Source)) == Execute(Input), "Capture/method regression: " + Output.Source);
                         }
         {
-            auto Output = Taze::Decompile(Luau::compile(CaptureFixtures[0])).Source;
-            Check(Output.find("[1]") == std::string::npos, "Straight-line native capture still boxed");
-            auto Method = Taze::Decompile(Luau::compile(CaptureFixtures[5])).Source;
+            auto Output = Astra::Decompile(Luau::compile(CaptureFixtures[0])).Source;
+            Check(Output.find("[1] =") == std::string::npos, "Straight-line native capture still boxed");
+            auto Method = Astra::Decompile(Luau::compile(CaptureFixtures[5])).Source;
             Check(Method.find(":add(") != std::string::npos && Method.find("self.") != std::string::npos,
                   "Method receiver was not made implicit");
         }
@@ -163,46 +167,61 @@ return answer, text, count, x, y, recurse(5), string.upper("literal"), callbacks
                 for (bool Spacing : {false, true})
                     for (bool Indexes : {false, true})
                     {
-                        Taze::Options O;
+                        Astra::Options O;
                         O.CompactUpvalues = Compact;
                         O.IncludeUpvalueIndexes = Indexes;
                         O.GroupSpacing = Spacing;
                         O.InferCallNames = false;
                         O.InferMemberNames = false;
-                        O.Naming = Taze::VariableNaming::Generic;
+                        O.Naming = Astra::VariableNaming::Generic;
                         O.LocalPrefix = "item";
                         O.ArgumentPrefix = "arg";
-                        O.Casing = Taze::VariableCase::Preserve;
-                        auto Text = Taze::Decompile(Input, O).Source;
+                        O.Casing = Astra::VariableCase::Preserve;
+                        auto Text = Astra::Decompile(Input, O).Source;
                         Check(Execute(Luau::compile(Text)) == Execute(Input), "Formatting/naming changed capture behavior");
                         Check((Text.find("-- Upvalues:") != std::string::npos) == Compact, "Capture comment style ignored");
-                        Check((Text.find("1: ") != std::string::npos) == Indexes, "Capture indexes must be independent of comment style");
+                        Check((Text.find("[1] ") != std::string::npos) == Indexes, "Capture indexes must be independent of comment style");
                     }
-            Taze::Options Parsed;
-            Taze::ApplyOption(Parsed, "upvalue-indexes", "false");
+            Astra::Options Parsed;
+            Astra::ApplyOption(Parsed, "upvalue-indexes", "false");
             Check(!Parsed.IncludeUpvalueIndexes && !Parsed.CompactUpvalues, "Upvalue option defaults/parser ignored");
+            Astra::ApplyOption(Parsed, "CompactArrays", "false");
+            Astra::ApplyOption(Parsed, "UseTabs", "true");
+            Astra::ApplyOption(Parsed, "BlankLinesBetweenGroups", "2");
+            Astra::ApplyOption(Parsed, "SpaceInsideTableBraces", "false");
+            Astra::ApplyOption(Parsed, "Casing", "PascalCase");
+            Astra::ApplyOption(Parsed, "Naming", "Inferred");
+            Check(!Parsed.CompactArrays && Parsed.UseTabs && Parsed.BlankLinesBetweenGroups == 2 && !Parsed.SpaceInsideTableBraces &&
+                      Parsed.Casing == Astra::VariableCase::Pascal && Parsed.Naming == Astra::VariableNaming::Inferred,
+                  "PascalCase option names or enum values ignored");
+            Check(Astra::CanonicalOptionKey("MaxAnalysisWork") == "max-analysis-work" &&
+                      Astra::CanonicalOptionKey("ModulePath") == "module-path",
+                  "Canonical keys do not cover resource and reserved aliases");
+            Reject([&] { Astra::ApplyOption(Parsed, "compactArrays", "true"); });
+            Astra::ApplyOption(Parsed, "BlankLinesBetweenGroups", "4");
+            Reject([&] { Astra::ValidateOptions(Parsed); });
             for (const char *Prefix : {"", "1bad", "bad.name", "bad-name", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"})
             {
-                Taze::Options O;
+                Astra::Options O;
                 O.LocalPrefix = Prefix;
-                Reject([&] { Taze::Decompile(Input, O); });
+                Reject([&] { Astra::Decompile(Input, O); });
             }
-            Taze::Options O;
+            Astra::Options O;
             O.ArgumentPrefix = "arg";
             O.LocalPrefix = "temp";
             O.UseTypeNames = false;
-            O.Casing = Taze::VariableCase::Camel;
+            O.Casing = Astra::VariableCase::Camel;
             auto Function = Luau::compile("return function(input) return input+1 end");
-            Check(Taze::Decompile(Function, O).Source.find("arg1") != std::string::npos, "Anonymous argument prefix ignored");
+            Check(Astra::Decompile(Function, O).Source.find("arg1") != std::string::npos, "Anonymous argument prefix ignored");
         }
         auto Bytes = Luau::compile(
             "local user_value = 9; local function mixedCaseFunction() return user_value end; return mixedCaseFunction", Debug);
-        Taze::Options S;
-        S.Casing = Taze::VariableCase::Preserve;
-        Check(Taze::Decompile(Bytes, S).Source.find("user_value") != std::string::npos, "Preserve casing lost debug spelling");
-        S.Casing = Taze::VariableCase::Snake;
+        Astra::Options S;
+        S.Casing = Astra::VariableCase::Preserve;
+        Check(Astra::Decompile(Bytes, S).Source.find("user_value") != std::string::npos, "Preserve casing lost debug spelling");
+        S.Casing = Astra::VariableCase::Snake;
         S.PreserveFunctionNames = false;
-        Check(Taze::Decompile(Bytes, S).Source.find("mixed_case_function") != std::string::npos, "Snake function casing missing");
+        Check(Astra::Decompile(Bytes, S).Source.find("mixed_case_function") != std::string::npos, "Snake function casing missing");
         S = {};
         S.ModulePath = "game.Module";
         for (bool Gc : {false, true})
@@ -212,7 +231,7 @@ return answer, text, count, x, y, recurse(5), string.upper("literal"), callbacks
                     S.IncludeGcLocators = Gc;
                     S.IncludeRequireLocators = Require;
                     S.IncludeLineComments = Lines;
-                    auto Text = Taze::Decompile(Bytes, S).Source;
+                    auto Text = Astra::Decompile(Bytes, S).Source;
                     Check((Text.find(" | require(") != std::string::npos) == (Require && Lines), "Require switch ignored");
                     Check((Text.find(" | filtergc(") != std::string::npos) == (!Require && Gc && Lines), "GC switch ignored");
                     Check(Text.find(" | \n") == std::string::npos, "Empty locator separator");
@@ -226,8 +245,8 @@ return answer, text, count, x, y, recurse(5), string.upper("literal"), callbacks
             Reject(
                 [&]
                 {
-                    Taze::Options Settings;
-                    Taze::ApplyOption(Settings, Pair.first, Pair.second);
+                    Astra::Options Settings;
+                    Astra::ApplyOption(Settings, Pair.first, Pair.second);
                 });
         for (auto Pair : {std::pair{"indent", "0"},
                           {"optimization-passes", "9"},
@@ -237,31 +256,30 @@ return answer, text, count, x, y, recurse(5), string.upper("literal"), callbacks
             Reject(
                 [&]
                 {
-                    Taze::Options Settings;
-                    Taze::ApplyOption(Settings, Pair.first, Pair.second);
-                    Taze::Decompile(Bytes, Settings);
+                    Astra::Options Settings;
+                    Astra::ApplyOption(Settings, Pair.first, Pair.second);
+                    Astra::Decompile(Bytes, Settings);
                 });
         S = {};
         S.MaxOutputBytes = 12;
-        Reject([&] { Taze::Decompile(Bytes, S); });
-        Reject([&] { Taze::Disassemble(Bytes, S); });
+        Reject([&] { Astra::Decompile(Bytes, S); });
+        Reject([&] { Astra::Disassemble(Bytes, S); });
         S = {};
         S.MaxAnalysisCells = 1;
-        Reject([&] { Taze::Decompile(Bytes, S); });
+        Reject([&] { Astra::Decompile(Bytes, S); });
         S = {};
         S.MaxAnalysisWork = 1;
-        Reject([&] { Taze::Decompile(Bytes, S); });
+        Reject([&] { Astra::Decompile(Bytes, S); });
         S = {};
         S.ForceStateMachine = true;
         S.AllowFallback = false;
-        Reject([&] { Taze::Decompile(Bytes, S); });
-        Taze::Options Deterministic;
+        Reject([&] { Astra::Decompile(Bytes, S); });
+        Astra::Options Deterministic;
         Deterministic.IncludeHeader = false;
-        auto Header = Taze::Decompile(Bytes).Source;
-        Check(Header.starts_with("-- Decompiled with Taze's Decompiler | Bytecode Version: ") &&
-                  Header.find("\n-- Time taken: ") != std::string::npos,
+        auto Header = Astra::Decompile(Bytes).Source;
+        Check(Header.starts_with("-- Decompiled with Astra | Bytecode Version: ") && Header.find("\n-- Time taken: ") != std::string::npos,
               "Header format differs");
-        auto Result = Taze::Decompile(Bytes, Deterministic);
+        auto Result = Astra::Decompile(Bytes, Deterministic);
         Check(Result.Stats.InputBytes == Bytes.size() && Result.Stats.InstructionCount > 0 && Result.Stats.SymbolCount > 0,
               "Missing statistics");
         std::vector<std::string_view> Inputs(19, Bytes);
@@ -270,7 +288,7 @@ return answer, text, count, x, y, recurse(5), string.upper("literal"), callbacks
         for (unsigned Workers : {1u, 2u, 4u, 0u, 32u})
             for (unsigned Repeat = 0; Repeat < 3; ++Repeat)
             {
-                auto Results = Taze::DecompileBatch(Inputs, Deterministic, Workers);
+                auto Results = Astra::DecompileBatch(Inputs, Deterministic, Workers);
                 Check(Results.size() == Inputs.size(), "Batch lost results");
                 for (std::size_t I = 0; I < Inputs.size(); ++I)
                     if (I == 3 || I == 11)
@@ -280,8 +298,8 @@ return answer, text, count, x, y, recurse(5), string.upper("literal"), callbacks
                                   Results[I].Output.Diagnostics == Result.Diagnostics,
                               "Parallel result differs from serial result");
             }
-        Check(Taze::DecompileBatch({}, {}, 4).empty(), "Empty batch failed");
-        Reject([&] { Taze::DecompileBatch(Inputs, {}, 33); });
+        Check(Astra::DecompileBatch({}, {}, 4).empty(), "Empty batch failed");
+        Reject([&] { Astra::DecompileBatch(Inputs, {}, 33); });
         // Deterministic byte mutations exercise validation without executing untrusted output.
         unsigned Random = 0x12345678;
         for (unsigned I = 0; I < 512; ++I)
@@ -289,18 +307,18 @@ return answer, text, count, x, y, recurse(5), string.upper("literal"), callbacks
             Random = Random * 1664525u + 1013904223u;
             auto Mutated = Bytes;
             Mutated[Random % Mutated.size()] ^= char((Random >> 16) | 1);
-            Taze::Options Limits;
+            Astra::Options Limits;
             Limits.IncludeHeader = false;
             Limits.MaxAnalysisCells = 100000;
             Limits.MaxOutputBytes = 1024 * 1024;
             Limits.MaxNesting = 16;
             try
             {
-                auto A = Taze::Decompile(Mutated, Limits);
-                auto B = Taze::Decompile(Mutated, Limits);
+                auto A = Astra::Decompile(Mutated, Limits);
+                auto B = Astra::Decompile(Mutated, Limits);
                 Check(A.Source == B.Source && A.Diagnostics == B.Diagnostics, "Mutation produced nondeterministic output");
             }
-            catch (const Taze::Error &)
+            catch (const Astra::Error &)
             {
                 ++Passed;
             }

@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <queue>
 
-namespace Taze
+namespace Astra
 {
 std::vector<unsigned> Reads(const Instruction &I, const Prototype &P)
 {
@@ -348,4 +348,4 @@ bool ControlFlow::Dominates(unsigned Header, unsigned Node) const
 {
     return DomEnter[Header] <= DomEnter[Node] && DomEnter[Node] < DomExit[Header];
 }
-} // namespace Taze
+} // namespace Astra

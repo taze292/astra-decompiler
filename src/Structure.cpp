@@ -1,6 +1,6 @@
 #include "Reconstruction.hpp"
 
-namespace Taze::Detail
+namespace Astra::Detail
 {
 bool Jump(LuauOpcode Op)
 {
@@ -287,13 +287,16 @@ std::vector<Statement> Function::Region(unsigned Start, unsigned End, int BreakT
                     Cleanup.push_back(Node);
                     Target = int(Next.Next);
                 }
-                else if (unsigned(Target) >= End && !Conditional(Next.Op) && Next.Op != LOP_CMPPROTO && !(Next.Op == LOP_LOADB && Next.C) &&
-                         Next.Op != LOP_FORNPREP && Next.Op != LOP_FORNLOOP && Next.Op != LOP_FORGPREP && Next.Op != LOP_FORGPREP_NEXT &&
-                         Next.Op != LOP_FORGPREP_INEXT && Next.Op != LOP_FORGLOOP)
+                else if (unsigned(Target) >= End && !Jump(Next.Op) && !Conditional(Next.Op) && Next.Op != LOP_CMPPROTO &&
+                         !(Next.Op == LOP_LOADB && Next.C) && Next.Op != LOP_FORNPREP && Next.Op != LOP_FORNLOOP &&
+                         Next.Op != LOP_FORGPREP && Next.Op != LOP_FORGPREP_NEXT && Next.Op != LOP_FORGPREP_INEXT &&
+                         Next.Op != LOP_FORGLOOP)
                 {
                     // Shared terminal blocks can live after a containing arm.
                     // Commit their effects only after proving the entire path
                     // reaches a return, instead of extending across other arms.
+                    // A self-loop is terminal control flow, not cleanup leading
+                    // to the physically adjacent, unreachable return.
                     Cleanup.push_back(Node);
                     Target = int(Next.Next);
                 }
@@ -819,9 +822,10 @@ std::vector<Statement> Function::StateMachine(std::string_view Reason)
                     std::vector<std::string> Vars;
                     for (unsigned J = 0; J < (Tail.Aux & 255); ++J)
                         Vars.push_back("Item" + std::to_string(J + 1));
-                    auto Text = Token(IteratorSymbols.at(I.A)) + " = coroutine.wrap(function()\n    for " + Join(Vars) + " in " + R(I.A) +
-                                ", " + R(I.A + 1) + ", " + R(I.A + 2) + " do\n        coroutine.yield(true, " + Join(Vars) +
-                                ")\n    end\n    return false\nend)";
+                    const auto Indent = std::string(E.Settings.UseTabs ? 1 : E.Settings.IndentWidth, E.Settings.UseTabs ? '\t' : ' ');
+                    auto Text = Token(IteratorSymbols.at(I.A)) + " = coroutine.wrap(function()\n" + Indent + "for " + Join(Vars) + " in " +
+                                R(I.A) + ", " + R(I.A + 1) + ", " + R(I.A + 2) + " do\n" + Indent + Indent + "coroutine.yield(true, " +
+                                Join(Vars) + ")\n" + Indent + "end\n" + Indent + "return false\nend)";
                     Statement Prepare{Kind::If, {}, "type(" + R(I.A) + ") == \"function\""};
                     Prepare.Body.push_back({Kind::Raw, {}, Token(IteratorSymbols.at(I.A)) + " = nil"});
                     Prepare.Else.push_back({Kind::Raw, {}, std::move(Text)});
@@ -889,4 +893,4 @@ std::vector<Statement> Function::StateMachine(std::string_view Reason)
     return Out;
 }
 
-} // namespace Taze::Detail
+} // namespace Astra::Detail

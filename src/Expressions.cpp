@@ -1,7 +1,7 @@
 #include "Reconstruction.hpp"
 #include <charconv>
 
-namespace Taze::Detail
+namespace Astra::Detail
 {
 bool Identifier(std::string_view Text)
 {
@@ -372,4 +372,4 @@ std::string FormatCondition(std::string Text, unsigned ParentPrecedence)
     return Text;
 }
 
-} // namespace Taze::Detail
+} // namespace Astra::Detail

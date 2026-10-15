@@ -1,3 +1,4 @@
+#include "Astra/Decompiler.hpp"
 #include "ControlFlowCases.hpp"
 #include "Luau/BytecodeBuilder.h"
 #include "Luau/Compiler.h"
@@ -6,7 +7,6 @@
 #include "PredicateDagCases.hpp"
 #include "ScopeCases.hpp"
 #include "StatementSyntaxCases.hpp"
-#include "Taze/Decompiler.hpp"
 #include "ThreadedLoopCases.hpp"
 #include "UniversalStructureCases.hpp"
 #include "lua.h"
@@ -921,22 +921,24 @@ int main(int Argc, char **Argv)
                 catch (const std::exception &Error)
                 {
                     std::cerr << "Invalid fixture " << Fixture.Name << ": " << Error.what() << '\n'
-                              << (Fixture.Serialized ? Taze::Disassemble(Input) : Fixture.Source) << '\n';
+                              << (Fixture.Serialized ? Astra::Disassemble(Input) : Fixture.Source) << '\n';
                     return 1;
                 }
                 for (unsigned Mode = 0; Mode < (Fixture.Serialized ? 6u : 3u); ++Mode)
                 {
                     ++Cases;
-                    Taze::Options Options;
+                    Astra::Options Options;
                     Options.IncludeHeader = false;
                     Options.IncludeFunctionLocators = false;
                     Options.OptimizationPasses = Mode % 3 == 0 ? 0 : 5;
                     Options.ForceStateMachine = Mode % 3 == 2;
                     Options.NativeCaptures = Mode < 3;
+                    Options.UseTabs = Mode % 2 != 0;
+                    Options.IndentWidth = Mode % 3 == 2 ? 2 : 4;
                     std::string Source;
                     try
                     {
-                        auto Result = Taze::Decompile(Input, Options);
+                        auto Result = Astra::Decompile(Input, Options);
                         Source = Result.Source;
                         if (!Options.ForceStateMachine)
                             (Fixture.Serialized ? RawFallbacks : SourceFallbacks) += unsigned(Result.StateMachineFunctions);
@@ -960,7 +962,7 @@ int main(int Argc, char **Argv)
                         auto Output = Compile(Source, 0, 0);
                         auto Actual = Execute(Output);
                         Check(Actual == Expected, "Execution mismatch\nExpected: " + Expected + "\nActual: " + Actual);
-                        auto Repeat = Taze::Decompile(Input, Options);
+                        auto Repeat = Astra::Decompile(Input, Options);
                         Check(Source == Repeat.Source && Result.Diagnostics == Repeat.Diagnostics, "Reconstruction is not deterministic");
                     }
                     catch (const std::exception &Error)
@@ -969,7 +971,7 @@ int main(int Argc, char **Argv)
                         std::cerr << "FAIL " << Fixture.Name << " optimization=" << Optimization << " debug=" << Debug
                                   << " passes=" << Options.OptimizationPasses << " machine=" << Options.ForceStateMachine
                                   << " native-captures=" << Options.NativeCaptures << ": " << Error.what() << "\nOriginal:\n"
-                                  << (Fixture.Serialized ? Taze::Disassemble(Input) : Fixture.Source) << "\nReconstructed:\n"
+                                  << (Fixture.Serialized ? Astra::Disassemble(Input) : Fixture.Source) << "\nReconstructed:\n"
                                   << Source << '\n';
                         // Keep failures useful and output bounded. The filter
                         // argument allows investigating any fixture separately.

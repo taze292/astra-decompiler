@@ -9,7 +9,7 @@
 #include <set>
 #include <sstream>
 
-namespace Taze
+namespace Astra
 {
 namespace
 {
@@ -857,4 +857,4 @@ std::string Disassemble(std::string_view Bytecode, const Options &Settings)
         throw Error("Disassembly exceeds output limit");
     return Text;
 }
-} // namespace Taze
+} // namespace Astra

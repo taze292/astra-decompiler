@@ -18,7 +18,7 @@
 #include <syncstream>
 #include <thread>
 
-namespace Taze
+namespace Astra
 {
 namespace
 {
@@ -208,7 +208,7 @@ void JsonOptions(Options &Settings, std::string_view Text)
         while (true)
         {
             Expect('"');
-            auto Key = Word();
+            auto Key = CanonicalOptionKey(Word());
             Expect('"');
             Expect(':');
             Space();
@@ -266,11 +266,11 @@ std::string Process(std::string_view Request, const Options &Settings)
                 Bytes[I] = char((Digit(Hex[I * 2]) << 4) | Digit(Hex[I * 2 + 1]));
             return Bytes;
         };
-        bool Json = Request.starts_with("TAZE4\n");
-        bool HasOptions = Json || Request.starts_with("TAZE3\n");
-        if (HasOptions || Request.starts_with("TAZE2\n"))
+        bool Json = Request.starts_with("ASTRA4\n");
+        bool HasOptions = Json || Request.starts_with("ASTRA3\n");
+        if (HasOptions || Request.starts_with("ASTRA2\n"))
         {
-            Request.remove_prefix(6);
+            Request.remove_prefix(Request.find('\n') + 1);
             auto Line = [&]()
             {
                 auto End = Request.find('\n');
@@ -296,7 +296,7 @@ std::string Process(std::string_view Request, const Options &Settings)
                     auto Equals = Entry.find('=');
                     if (Equals == std::string_view::npos || Equals == 0 || Equals + 1 == Entry.size())
                         throw Error("Invalid bridge option entry");
-                    auto Key = Entry.substr(0, Equals);
+                    auto Key = CanonicalOptionKey(Entry.substr(0, Equals));
                     if (Key == "module-path" || Key == "filter-line" || !Seen.insert(std::string(Key)).second)
                         throw Error("Duplicate or reserved bridge option");
                     ApplyOption(RequestSettings, Key, Entry.substr(Equals + 1));
@@ -427,7 +427,7 @@ int ServeWebSocket(unsigned Port, const Options &Settings)
         throw Error("Cannot bind 127.0.0.1:" + std::to_string(Port) + " (port may already be in use)");
     if (listen(Listener.Value, 8) == SOCKET_ERROR)
         throw Error("Cannot listen on socket");
-    std::cout << "Taze listening at ws://127.0.0.1:" << Port
+    std::cout << "Astra listening at ws://127.0.0.1:" << Port
               << "/decompile\nRun tools/Decompile.luau in your executor. Ctrl+C stops the server.\n"
               << std::flush;
     static std::atomic<unsigned> Clients = 0;
@@ -468,7 +468,7 @@ int ServeWebSocket(unsigned Port, const Options &Settings)
                         catch (...)
                         {
                         }
-                        std::osyncstream(std::cerr) << "taze: " << Failure.what() << '\n';
+                        std::osyncstream(std::cerr) << "astra: " << Failure.what() << '\n';
                     }
                 })
                 .detach();
@@ -481,13 +481,13 @@ int ServeWebSocket(unsigned Port, const Options &Settings)
         }
     }
 }
-} // namespace Taze
+} // namespace Astra
 #else
-namespace Taze
+namespace Astra
 {
 int ServeWebSocket(unsigned, const Options &)
 {
     throw Error("WebSocket server mode currently requires Windows");
 }
-} // namespace Taze
+} // namespace Astra
 #endif

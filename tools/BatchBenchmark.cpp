@@ -1,4 +1,4 @@
-#include "Taze/Decompiler.hpp"
+#include "Astra/Decompiler.hpp"
 #include <algorithm>
 #include <chrono>
 #include <fstream>
@@ -10,28 +10,28 @@ int main(int Argc, char **Argv)
     try
     {
         if (Argc != 2)
-            throw Taze::Error("Usage: taze-batch-bench INPUT.luac");
+            throw Astra::Error("Usage: astra-batch-bench INPUT.luac");
         std::ifstream File(Argv[1], std::ios::binary);
         if (!File)
-            throw Taze::Error("Cannot open input");
+            throw Astra::Error("Cannot open input");
         std::string Bytes((std::istreambuf_iterator<char>(File)), {});
-        Taze::Options Settings;
+        Astra::Options Settings;
         Settings.IncludeHeader = false;
-        auto Expected = Taze::Decompile(Bytes, Settings);
+        auto Expected = Astra::Decompile(Bytes, Settings);
         std::vector<std::string_view> Inputs(64, Bytes);
         std::cout << "workers,inputs,samples,median_ms,inputs_per_second\n";
         for (unsigned Workers : {1u, 2u, 4u, 8u})
         {
-            Taze::DecompileBatch(Inputs, Settings, Workers);
+            Astra::DecompileBatch(Inputs, Settings, Workers);
             std::vector<double> Times;
             for (unsigned I = 0; I < 7; ++I)
             {
                 auto Start = std::chrono::steady_clock::now();
-                auto Results = Taze::DecompileBatch(Inputs, Settings, Workers);
+                auto Results = Astra::DecompileBatch(Inputs, Settings, Workers);
                 auto End = std::chrono::steady_clock::now();
                 for (const auto &Result : Results)
                     if (!Result.Succeeded() || Result.Output.Source != Expected.Source || Result.Output.Diagnostics != Expected.Diagnostics)
-                        throw Taze::Error("Batch differs from serial output");
+                        throw Astra::Error("Batch differs from serial output");
                 Times.push_back(std::chrono::duration<double, std::milli>(End - Start).count());
             }
             std::sort(Times.begin(), Times.end());

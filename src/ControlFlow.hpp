@@ -3,7 +3,7 @@
 #include "Bytecode.hpp"
 #include <bitset>
 
-namespace Taze
+namespace Astra
 {
 struct AnalysisBudget
 {
@@ -29,4 +29,4 @@ struct ControlFlow
 };
 
 std::vector<unsigned> Reads(const Instruction &I, const Prototype &P);
-} // namespace Taze
+} // namespace Astra

@@ -8,7 +8,7 @@
 #include <set>
 #include <thread>
 
-namespace Taze
+namespace Astra
 {
 namespace
 {
@@ -99,7 +99,7 @@ int DecompileFiles(const std::vector<std::string> &Inputs, const std::string &Di
             }
         }
     }
-    std::cerr << "taze: " << Inputs.size() - Failed << " succeeded, " << Failed << " failed\n";
+    std::cerr << "astra: " << Inputs.size() - Failed << " succeeded, " << Failed << " failed\n";
     return Failed ? 1 : 0;
 }
-} // namespace Taze
+} // namespace Astra

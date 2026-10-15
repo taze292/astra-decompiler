@@ -1,9 +1,10 @@
-#include "Taze/Decompiler.hpp"
+#include "Astra/Decompiler.hpp"
 #include <algorithm>
 #include <charconv>
 #include <limits>
+#include <utility>
 
-namespace Taze
+namespace Astra
 {
 namespace
 {
@@ -12,7 +13,7 @@ unsigned Integer(std::string_view Text)
     unsigned Value = 0;
     auto [End, Error] = std::from_chars(Text.data(), Text.data() + Text.size(), Value);
     if (Error != std::errc{} || End != Text.data() + Text.size())
-        throw Taze::Error("Expected an unsigned decimal integer");
+        throw Astra::Error("Expected an unsigned decimal integer");
     return Value;
 }
 bool Boolean(std::string_view Text)
@@ -25,8 +26,70 @@ bool Boolean(std::string_view Text)
 }
 } // namespace
 
+std::string_view CanonicalOptionKey(std::string_view Key)
+{
+    static constexpr std::pair<std::string_view, std::string_view> Names[] = {
+        {"Encoding", "encoding"},
+        {"Casing", "casing"},
+        {"Naming", "naming"},
+        {"IncludeHeader", "header"},
+        {"IncludeLineComments", "lines"},
+        {"IncludeUpvalueComments", "upvalues"},
+        {"IncludeUpvalueIndexes", "upvalue-indexes"},
+        {"IncludeFunctionLocators", "locators"},
+        {"IncludeGcLocators", "gc-locators"},
+        {"IncludeRequireLocators", "require-locators"},
+        {"UseTypeNames", "type-names"},
+        {"PreserveFunctionNames", "preserve-function-names"},
+        {"NativeCaptures", "native-captures"},
+        {"MethodSyntax", "method-syntax"},
+        {"InferMemberNames", "infer-members"},
+        {"InferCallNames", "infer-calls"},
+        {"CompactUpvalues", "compact-upvalues"},
+        {"CompactArrays", "compact-arrays"},
+        {"GroupSpacing", "group-spacing"},
+        {"UseTabs", "use-tabs"},
+        {"BlankLinesBetweenGroups", "blank-lines-between-groups"},
+        {"SpaceInsideTableBraces", "space-inside-table-braces"},
+        {"LocalPrefix", "local-prefix"},
+        {"ArgumentPrefix", "argument-prefix"},
+        {"ForceStateMachine", "state-machine"},
+        {"AllowFallback", "fallback"},
+        {"IndentWidth", "indent"},
+        {"OptimizationPasses", "optimization-passes"},
+        {"MaxNesting", "max-nesting"},
+        {"MaxAnalysisCells", "max-analysis-cells"},
+        {"MaxAnalysisWork", "max-analysis-work"},
+        {"MaxInputBytes", "max-input-bytes"},
+        {"MaxOutputBytes", "max-output-bytes"},
+        {"FilterLineField", "filter-line"},
+        {"ModulePath", "module-path"},
+    };
+    for (const auto &[Pascal, Cli] : Names)
+        if (Key == Pascal || Key == Cli)
+            return Cli;
+    throw Error("Unknown option: " + std::string(Key));
+}
+
 void ApplyOption(Options &S, std::string_view Key, std::string_view Value)
 {
+    Key = CanonicalOptionKey(Key);
+    std::string EnumValue;
+    if (Key == "encoding" || Key == "casing" || Key == "naming")
+    {
+        for (char C : Value)
+            EnumValue += C >= 'A' && C <= 'Z' ? char(C - 'A' + 'a') : C;
+        if (Key == "casing")
+        {
+            if (EnumValue == "pascalcase")
+                EnumValue = "pascal";
+            else if (EnumValue == "camelcase")
+                EnumValue = "camel";
+            else if (EnumValue == "snake_case" || EnumValue == "snakecase")
+                EnumValue = "snake";
+        }
+        Value = EnumValue;
+    }
     if (Key == "encoding")
     {
         if (Value == "auto")
@@ -88,10 +151,18 @@ void ApplyOption(Options &S, std::string_view Key, std::string_view Value)
         S.InferCallNames = Boolean(Value);
     else if (Key == "compact-upvalues")
         S.CompactUpvalues = Boolean(Value);
+    else if (Key == "compact-arrays")
+        S.CompactArrays = Boolean(Value);
     else if (Key == "upvalue-indexes")
         S.IncludeUpvalueIndexes = Boolean(Value);
     else if (Key == "group-spacing")
         S.GroupSpacing = Boolean(Value);
+    else if (Key == "use-tabs")
+        S.UseTabs = Boolean(Value);
+    else if (Key == "blank-lines-between-groups")
+        S.BlankLinesBetweenGroups = Integer(Value);
+    else if (Key == "space-inside-table-braces")
+        S.SpaceInsideTableBraces = Boolean(Value);
     else if (Key == "local-prefix")
         S.LocalPrefix = Value;
     else if (Key == "argument-prefix")
@@ -145,6 +216,8 @@ void ValidateOptions(const Options &S)
         throw Error("Module path must be a single-line ASCII expression with escaped names (maximum 8192 bytes)");
     if (S.IndentWidth < 1 || S.IndentWidth > 16)
         throw Error("Indent width must be between 1 and 16");
+    if (S.BlankLinesBetweenGroups > 3)
+        throw Error("Blank lines between groups must be between 0 and 3");
     if (S.OptimizationPasses > 8)
         throw Error("Optimization passes must be between 0 and 8");
     if (S.MaxNesting < 1 || S.MaxNesting > 128)
@@ -159,4 +232,4 @@ void ValidateOptions(const Options &S)
     if (S.ForceStateMachine && !S.AllowFallback)
         throw Error("Forced state machine conflicts with disabled fallback");
 }
-} // namespace Taze
+} // namespace Astra

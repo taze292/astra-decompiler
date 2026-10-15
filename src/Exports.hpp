@@ -4,7 +4,7 @@
 #include <memory>
 #include <set>
 
-namespace Taze
+namespace Astra
 {
 struct ControlFlow;
 // A bounded symbolic graph for export annotations only. It never executes module code.
@@ -70,4 +70,4 @@ class Exports
     void Alias(unsigned Symbol, unsigned Target);
     std::map<unsigned, std::string> Find(unsigned Main);
 };
-} // namespace Taze
+} // namespace Astra

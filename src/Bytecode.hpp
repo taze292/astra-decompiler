@@ -4,12 +4,12 @@
 
 #include "Luau/Bytecode.h"
 #include "Luau/BytecodeUtils.h"
-#include "Taze/Decompiler.hpp"
+#include "Astra/Decompiler.hpp"
 #include <array>
 #include <map>
 #include <utility>
 
-namespace Taze
+namespace Astra
 {
 struct Constant
 {
@@ -73,4 +73,4 @@ std::string Quote(std::string_view Text);
 std::string Number(double Value);
 std::string OpcodeName(LuauOpcode Op);
 std::vector<unsigned> Writes(const Instruction &I, const Prototype &P);
-} // namespace Taze
+} // namespace Astra

@@ -5,7 +5,7 @@
 #include <functional>
 #include <limits>
 
-namespace Taze
+namespace Astra
 {
 Exports::Value Exports::Make(Expr::Kind Type, unsigned Id, std::string Key, std::vector<Value> Args)
 {
@@ -163,7 +163,7 @@ unsigned Exports::Record(const Prototype &P, const ControlFlow &Flow, unsigned P
         }
         if (I.Op == LOP_NEWCLOSURE || I.Op == LOP_DUPCLOSURE)
             continue; // Bound when the child frame is generated.
-        auto Changed = Taze::Writes(I, P);
+        auto Changed = Astra::Writes(I, P);
         for (auto Reg : Changed)
             Define(Written[N].at(Reg),
                    Reg == I.A ? Output
@@ -388,4 +388,4 @@ std::map<unsigned, std::string> Exports::Find(unsigned Main)
         Result.clear();
     return Result;
 }
-} // namespace Taze
+} // namespace Astra

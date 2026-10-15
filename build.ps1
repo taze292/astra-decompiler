@@ -11,7 +11,7 @@ $CMakePath = if ($CMakeCommand) { $CMakeCommand.Source } else {
 }
 if (-not $CMakePath) { throw 'CMake was not found. Install CMake or use a Visual Studio developer shell.' }
 $ConfigureArguments = @('-S', $ProjectRoot, '-B', "$ProjectRoot/build", '-G', 'Visual Studio 17 2022', '-T', 'ClangCL', '-A', 'x64')
-if ($LuauDirectory) { $ConfigureArguments += "-DTAZE_LUAU_DIR=$LuauDirectory" }
+if ($LuauDirectory) { $ConfigureArguments += "-DASTRA_LUAU_DIR=$LuauDirectory" }
 & $CMakePath @ConfigureArguments
 if ($LASTEXITCODE) { throw 'CMake configuration failed.' }
 & $CMakePath --build "$ProjectRoot/build" --config $Configuration --parallel 8

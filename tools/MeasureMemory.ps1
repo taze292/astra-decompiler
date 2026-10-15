@@ -11,7 +11,7 @@ foreach ($Variant in @('baseline', 'current')) {
     for ($Run = 1; $Run -le 3; $Run++) {
         $Directory = if ($Variant -eq 'baseline') { $BaselineDirectory } else { $BuildDirectory }
         $Start = [Diagnostics.ProcessStartInfo]::new()
-        $Start.FileName = (Resolve-Path "$Directory/taze-bench.exe").Path
+        $Start.FileName = (Resolve-Path "$Directory/astra-bench.exe").Path
         $Start.UseShellExecute = $false
         $Start.CreateNoWindow = $true
         $Start.RedirectStandardOutput = $true

@@ -15,7 +15,7 @@
 #include <sstream>
 #include <unordered_map>
 
-namespace Taze::Detail
+namespace Astra::Detail
 {
 bool Identifier(std::string_view Text);
 std::string Pascal(std::string_view Text);
@@ -178,4 +178,4 @@ class Engine
     void Budget(std::size_t Amount);
 };
 
-} // namespace Taze::Detail
+} // namespace Astra::Detail

@@ -1,7 +1,7 @@
+#include "Astra/Decompiler.hpp"
 #include "Luau/BytecodeBuilder.h"
 #include "Luau/Common.h"
 #include "Luau/Compiler.h"
-#include "Taze/Decompiler.hpp"
 #include "lua.h"
 #include "lualib.h"
 #include <iostream>
@@ -185,12 +185,12 @@ int main()
                     for (bool Machine : {false, true})
                         for (unsigned Passes : {0u, 1u, 5u})
                         {
-                            Taze::Options Settings;
+                            Astra::Options Settings;
                             Settings.ForceStateMachine = Machine;
                             Settings.OptimizationPasses = Passes;
                             Settings.IncludeHeader = false;
                             Settings.IncludeFunctionLocators = false;
-                            auto Output = Taze::Decompile(Input, Settings);
+                            auto Output = Astra::Decompile(Input, Settings);
                             if (Execute(Luau::compile(Output.Source)) != Expected)
                                 throw std::runtime_error("Recovered fallback changed behavior:\n" + Output.Source);
                             ++Checks;
@@ -204,19 +204,19 @@ int main()
                 for (bool Comments : {false, true})
                 {
                     auto Input = GuardedInline(Callable::Original, true, true, false, true);
-                    Taze::Options Settings;
+                    Astra::Options Settings;
                     Settings.IncludeHeader = false;
                     Settings.ForceStateMachine = Machine;
                     Settings.CompactUpvalues = Compact;
                     Settings.IncludeLineComments = Comments;
                     Settings.IncludeUpvalueComments = Comments;
-                    auto Output = Taze::Decompile(Input, Settings);
-                    const std::string Marker = "-- Uninlined by Taze's Decompiler";
+                    auto Output = Astra::Decompile(Input, Settings);
+                    const std::string Marker = "-- Uninlined by Astra";
                     auto Position = Output.Source.find(Marker);
                     if (Position == std::string::npos || Output.Source.find(Marker, Position + 1) != std::string::npos)
                         throw std::runtime_error("Recovered function must have exactly one provenance comment:\n" + Output.Source);
                     ++Checks;
-                    if (Output.Source.find("Upvalues:") != std::string::npos ||
+                    if (Output.Source.find("-- Upvalues") != std::string::npos ||
                         Output.Source.substr(Position, Output.Source.find('\n', Position) - Position) != Marker)
                         throw std::runtime_error("Recovered function retained ordinary metadata comments:\n" + Output.Source);
                     ++Checks;
@@ -241,12 +241,12 @@ int main()
         }
         try
         {
-            Taze::Options Settings;
-            Settings.Encoding = Taze::OpcodeEncoding::Plain;
-            Taze::Decompile(GuardedInline(Callable::Original, false, false, true), Settings);
+            Astra::Options Settings;
+            Settings.Encoding = Astra::OpcodeEncoding::Plain;
+            Astra::Decompile(GuardedInline(Callable::Original, false, false, true), Settings);
             throw std::runtime_error("CMPPROTO accepted an out-of-range callable register");
         }
-        catch (const Taze::Error &Error)
+        catch (const Astra::Error &Error)
         {
             if (std::string(Error.what()).find("Register index out of range") == std::string::npos)
                 throw;

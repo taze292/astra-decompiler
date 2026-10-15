@@ -1,6 +1,6 @@
 #include "Reconstruction.hpp"
 
-namespace Taze::Detail
+namespace Astra::Detail
 {
 bool Function::PredicateRegion(unsigned Pos, unsigned Limit, unsigned &LastTest, unsigned &Fallthrough, int &Target, std::string &Test)
 {
@@ -232,4 +232,4 @@ bool Function::PredicateRegion(unsigned Pos, unsigned Limit, unsigned &LastTest,
     Target = BestTarget == P.Instructions.size() ? int(P.Code.size()) : int(P.Instructions[BestTarget].Pc);
     return true;
 }
-} // namespace Taze::Detail
+} // namespace Astra::Detail

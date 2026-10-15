@@ -9,3 +9,5 @@
 *.pdb
 *.ilk
 .vs/
+__pycache__/
+*.py[cod]

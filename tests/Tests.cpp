@@ -1,8 +1,8 @@
+#include "Astra/Decompiler.hpp"
 #include "Luau/BytecodeBuilder.h"
 #include "Luau/BytecodeUtils.h"
 #include "Luau/Common.h"
 #include "Luau/Compiler.h"
-#include "Taze/Decompiler.hpp"
 #include "lua.h"
 #include "lualib.h"
 #include <fstream>
@@ -26,11 +26,10 @@ class RobloxEncoder : public Luau::BytecodeEncoder
     }
 };
 
-std::string Execute(const std::string &Bytes)
+std::string Execute(const std::string &Bytes, unsigned Budget = 100000)
 {
     std::unique_ptr<lua_State, decltype(&lua_close)> L(luaL_newstate(), lua_close);
     luaL_openlibs(L.get());
-    unsigned Budget = 100000;
     lua_callbacks(L.get())->userdata = &Budget;
     lua_callbacks(L.get())->interrupt = [](lua_State *State, int Gc)
     {
@@ -172,9 +171,9 @@ int main()
                         Compile.debugLevel = Debug;
                         auto Original = Luau::compile(Source, Compile);
                         auto Expected = Execute(Original);
-                        Taze::Options Settings;
+                        Astra::Options Settings;
                         Settings.ForceStateMachine = StateMachine;
-                        auto Result = Taze::Decompile(Original, Settings);
+                        auto Result = Astra::Decompile(Original, Settings);
                         Generated = Result.Source;
                         if (Generated.find(';') != std::string::npos)
                             throw std::runtime_error("Generated a statement semicolon");
@@ -246,10 +245,10 @@ int main()
             for (bool Native : {false, true})
                 for (bool Machine : {false, true})
                 {
-                    Taze::Options O;
+                    Astra::Options O;
                     O.NativeCaptures = Native;
                     O.ForceStateMachine = Machine;
-                    Check(Execute(Luau::compile(Taze::Decompile(Input, O).Source)) == Execute(Input),
+                    Check(Execute(Luau::compile(Astra::Decompile(Input, O).Source)) == Execute(Input),
                           "Closed reference lost its detached value");
                 }
         }
@@ -264,7 +263,7 @@ int main()
                                         "    return Shared, math.abs(Input.Count), \"Marker\\n\\\"\\\\\\000\", 12345.75\n"
                                         "end\nreturn Probe";
         auto Bytecode = Luau::compile(StyleSource, Compile);
-        auto Source = Taze::Decompile(Bytecode).Source;
+        auto Source = Astra::Decompile(Bytecode).Source;
         Check(Source.find("-- Line: 2 | filtergc(\"function\", { Line = 2, Name = \"Probe\" }, true)") != std::string::npos,
               "Missing inline locator or serialized function name");
         auto Start = Source.find("filtergc(");
@@ -275,25 +274,25 @@ int main()
                                         Lookup);
         Check(Execute(LookupTest) == Execute(Luau::compile("return 'Probe',2,nil")),
               "Named locator should use the original name and line without constants");
-        Check(Source.find("1: Shared (type \"Copy\")") != std::string::npos, "Missing default numbered Upvalues block");
+        Check(Source.find("-- [1] Shared (copy)") != std::string::npos, "Missing default numbered Upvalues comment");
         Check(Source.find("local First = Input.Name\n    local Second = Input.Value\n\n    Input.Value = First") != std::string::npos,
               "Consecutive locals were not grouped and separated from writes");
         Check(Source.find("\n\n    return ") != std::string::npos, "Missing return separation");
         Check(Source.find("\n    \n") == std::string::npos, "Blank lines contain indentation whitespace");
-        Taze::Options Settings;
+        Astra::Options Settings;
         Settings.IncludeFunctionLocators = false;
-        auto WithoutLookup = Taze::Decompile(Bytecode, Settings).Source;
+        auto WithoutLookup = Astra::Decompile(Bytecode, Settings).Source;
         Check(WithoutLookup.find("filtergc(") == std::string::npos && WithoutLookup.find("-- Line: 2") != std::string::npos,
               "Locator suppression removed line comments");
         Settings.IncludeFunctionLocators = true;
         Settings.IncludeLineComments = false;
-        Check(Taze::Decompile(Bytecode, Settings).Source.find("filtergc(") == std::string::npos,
+        Check(Astra::Decompile(Bytecode, Settings).Source.find("filtergc(") == std::string::npos,
               "Disabled line comments emitted a locator");
         Settings.IncludeUpvalueComments = false;
-        Check(Taze::Decompile(Bytecode, Settings).Source.find("Upvalues:") == std::string::npos,
+        Check(Astra::Decompile(Bytecode, Settings).Source.find("-- Upvalues") == std::string::npos,
               "Disabled upvalue comments emitted a label");
         Compile.debugLevel = 0;
-        auto Stripped = Taze::Decompile(Luau::compile(StyleSource, Compile)).Source;
+        auto Stripped = Astra::Decompile(Luau::compile(StyleSource, Compile)).Source;
         Check(Stripped.find("-- Line: 2 | filtergc(\"function\", { Line = 2,") != std::string::npos,
               "Stripped local debug names should preserve the serialized function start line");
         Check(Stripped.find(", Name = ") == std::string::npos, "Stripped function acquired an invented GC name");
@@ -304,16 +303,16 @@ int main()
                                           StrippedLookup);
         Check(Execute(StrippedTest) == Execute(Luau::compile("return 2,nil,5")), "Unnamed locator must limit constants to five");
         Compile.debugLevel = 2;
-        auto PreserveSource = Taze::Decompile(Luau::compile("local function lowerCamel() return 7 end return lowerCamel", Compile)).Source;
+        auto PreserveSource = Astra::Decompile(Luau::compile("local function lowerCamel() return 7 end return lowerCamel", Compile)).Source;
         Check(PreserveSource.find("function lowerCamel(") != std::string::npos, "Function name casing changed");
         Compile.debugLevel = 0;
-        auto TableSource = Taze::Decompile(Luau::compile("local A,B={},{} A[1]=0 B[1]=1 return A,B", Compile)).Source;
-        Check(TableSource.find("return { [1] = 0 }, { [1] = 1 }") != std::string::npos,
+        auto TableSource = Astra::Decompile(Luau::compile("local A,B={},{} A[1]=0 B[1]=1 return A,B", Compile)).Source;
+        Check(TableSource.find("return { 0 }, { 1 }") != std::string::npos,
               "Interleaved small tables were not folded and redundant locals removed");
-        auto AliasSource = Taze::Decompile(Luau::compile("local A={}; local B=A; print(B,B); return B", Compile)).Source;
+        auto AliasSource = Astra::Decompile(Luau::compile("local A={}; local B=A; print(B,B); return B", Compile)).Source;
         Check(AliasSource.find("print(Table1, Table1)") != std::string::npos && AliasSource.find("local Table2") == std::string::npos,
               "Repeated stable aliases were not removed");
-        auto MutableSource = Taze::Decompile(Luau::compile("local A=1; local B=A; A=2; return B,A", Compile)).Source;
+        auto MutableSource = Astra::Decompile(Luau::compile("local A=1; local B=A; A=2; return B,A", Compile)).Source;
         Check(MutableSource.find("return 1, 2") != std::string::npos || MutableSource.find("return Number1, 2") != std::string::npos,
               "Mutable source alias lost its snapshot value");
     }
@@ -331,11 +330,11 @@ int main()
                 throw std::runtime_error("Cannot read bridge fixture: " + Path);
             return std::string(std::istreambuf_iterator<char>(In), {});
         };
-        auto Harness = Read(std::string(TAZE_SOURCE_DIR) + "/tests/BridgeHarness.luau");
-        auto Bridge = Read(std::string(TAZE_SOURCE_DIR) + "/tools/Decompile.luau");
+        auto Harness = Read(std::string(ASTRA_SOURCE_DIR) + "/tests/BridgeHarness.luau");
+        auto Bridge = Read(std::string(ASTRA_SOURCE_DIR) + "/tools/Decompile.luau");
         auto Marker = Harness.find("--!BRIDGE_SOURCE!");
         Harness.replace(Marker, std::string("--!BRIDGE_SOURCE!").size(), Bridge);
-        if (Execute(Luau::compile(Harness)) != Execute(Luau::compile("return 6")))
+        if (Execute(Luau::compile(Harness), 500000) != Execute(Luau::compile("return 6")))
             throw std::runtime_error("Bridge probe modes failed");
         Passed += 6;
     }
@@ -370,10 +369,10 @@ int main()
                 Luau::CompileOptions Compile;
                 Compile.optimizationLevel = Optimization;
                 Compile.debugLevel = 2;
-                Taze::Options Settings;
+                Astra::Options Settings;
                 Settings.ModulePath = "game.ReplicatedStorage.Test";
                 Settings.FilterLineField = "StartLine";
-                auto Result = Taze::Decompile(Luau::compile(Source, Compile), Settings).Source;
+                auto Result = Astra::Decompile(Luau::compile(Source, Compile), Settings).Source;
                 auto Expected = " | require(" + Settings.ModulePath + ")" + Suffix;
                 if (Suffix == "NONE" ? Result.find(" | require(") != std::string::npos : Result.find(Expected) == std::string::npos)
                     throw std::runtime_error("Incorrect module export locator\n" + Result);
@@ -415,7 +414,7 @@ int main()
             Luau::CompileOptions Compile;
             Compile.optimizationLevel = 0;
             Compile.debugLevel = 0;
-            auto Result = Taze::Decompile(Luau::compile(Source, Compile)).Source;
+            auto Result = Astra::Decompile(Luau::compile(Source, Compile)).Source;
             if (Result.find(Expected) == std::string::npos)
                 throw std::runtime_error("Missing categorized name: " + Expected + "\n" + Result);
             auto Bytes = Luau::compile(Result);
@@ -435,10 +434,10 @@ int main()
     {
         try
         {
-            Taze::Decompile(std::string_view(Sample).substr(0, Size));
+            Astra::Decompile(std::string_view(Sample).substr(0, Size));
             Failed++;
         }
-        catch (const Taze::Error &)
+        catch (const Astra::Error &)
         {
             Passed++;
         }
@@ -477,20 +476,20 @@ int main()
                 auto Expected = Execute(Plain);
                 for (bool Roblox : {false, true})
                 {
-                    auto Result = Taze::Decompile(Roblox ? Encoded : Plain);
+                    auto Result = Astra::Decompile(Roblox ? Encoded : Plain);
                     if (Result.BytecodeVersion != Version)
                         throw std::runtime_error("Wrong bytecode version");
-                    if (Roblox && Result.Encoding != Taze::OpcodeEncoding::Roblox)
+                    if (Roblox && Result.Encoding != Astra::OpcodeEncoding::Roblox)
                         throw std::runtime_error("Wrong opcode encoding");
                     auto Recompiled = Luau::compile(Result.Source, Options);
                     if (Execute(Recompiled) != Expected)
                         throw std::runtime_error("Versioned execution mismatch");
                     Passed++;
                 }
-                Taze::Options Deterministic;
+                Astra::Options Deterministic;
                 Deterministic.IncludeHeader = false;
-                if (Taze::Decompile(Encoded + std::string(24, '\0'), Deterministic).Source !=
-                    Taze::Decompile(Encoded, Deterministic).Source)
+                if (Astra::Decompile(Encoded + std::string(24, '\0'), Deterministic).Source !=
+                    Astra::Decompile(Encoded, Deterministic).Source)
                     throw std::runtime_error("Roblox trailer affected source");
                 Passed++;
             }
@@ -534,13 +533,13 @@ int main()
                 CostModel->value = true;
                 VectorDouble->value = false;
                 auto V12 = Luau::compile(Source, Options);
-                auto V12Result = Taze::Decompile(V12);
+                auto V12Result = Astra::Decompile(V12);
                 if (V12Result.BytecodeVersion != 12 || V12Result.Source.find("vector.create(") == std::string::npos)
                     throw std::runtime_error("Version 12 vector compatibility regressed");
 
                 VectorDouble->value = true;
                 auto V13 = Luau::compile(Source, Options);
-                auto V13Result = Taze::Decompile(V13);
+                auto V13Result = Astra::Decompile(V13);
                 if (V13Result.BytecodeVersion != 13 || V13Result.Source.find("8.636") == std::string::npos)
                     throw std::runtime_error("Version 13 double-vector precision was not preserved");
                 auto Recompiled = Luau::compile(V13Result.Source, Options);
@@ -551,10 +550,10 @@ int main()
                 Mislabeled[0] = 12;
                 try
                 {
-                    Taze::Decompile(Mislabeled);
+                    Astra::Decompile(Mislabeled);
                     throw std::runtime_error("Version 12 accepted a version 13-only double-vector constant");
                 }
-                catch (const Taze::Error &)
+                catch (const Astra::Error &)
                 {
                 }
                 Passed++;
@@ -573,10 +572,10 @@ int main()
     {
         try
         {
-            Taze::Decompile(Bad);
+            Astra::Decompile(Bad);
             Failed++;
         }
-        catch (const Taze::Error &)
+        catch (const Astra::Error &)
         {
             Passed++;
         }

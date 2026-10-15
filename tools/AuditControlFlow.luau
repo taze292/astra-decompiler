@@ -1,9 +1,13 @@
--- Silent compile-only audit of replicated scripts. Inspect TazeControlFlowAudit.
+-- Silent compile-only audit of replicated scripts. Inspect AstraControlFlowAudit.
 local Environment = getgenv()
-local Bridge = assert(Environment.TazeBridge, "Install the local bridge first")
-local Options = Environment.TazeControlFlowAuditOptions or {
-    header = false, upvalues = false, lines = false, ["state-machine"] = false,
-    casing = "pascal", naming = "inferred",
+local Bridge = assert(Environment.AstraBridge, "Install the local bridge first")
+local Options = Environment.AstraControlFlowAuditOptions or {
+    IncludeHeader = false,
+    IncludeUpvalueComments = false,
+    IncludeLineComments = false,
+    ForceStateMachine = false,
+    Casing = "pascal",
+    Naming = "inferred",
 }
 local Started = os.clock()
 local Targets, Seen = {}, {}
@@ -21,8 +25,8 @@ if type(getscripts) == "function" then
 end
 table.sort(Targets, function(A, B) return A:GetFullName() < B:GetFullName() end)
 local Report = { Running = true, Total = #Targets, Tested = 0, Compiled = 0, Fallbacks = 0, EmptySources = 0, Cases = {}, Errors = {}, Retries = {} }
-Environment.TazeControlFlowAudit = Report
-Environment.TazeControlFlowAuditTargets = Targets
+Environment.AstraControlFlowAudit = Report
+Environment.AstraControlFlowAuditTargets = Targets
 for Index, Target in Targets do
     if Report.Cancelled then break end
     local Path = Target:GetFullName()
@@ -36,7 +40,7 @@ for Index, Target in Targets do
     Report.Tested += 1
     if Ok and type(Source) == "string" then
         if #Source == 0 then Report.EmptySources += 1 end
-        local Compiled, Error = loadstring(Source, "TazeFlowAudit")
+        local Compiled, Error = loadstring(Source, "AstraFlowAudit")
         local Reasons = {}
         for Line in Source:gmatch("[^\n]+") do
             if Line:find("-- Control flow required an explicit state machine.", 1, true) then

@@ -9,9 +9,18 @@ local function Install(Environment)
     local WebSocket = Environment.Provider
     local game = Environment.Game
     local print = function() error("Bridge must not print") end
-    local warn = function(Message) Environment.Warning = Message end
+    local warn = function() error("Bridge must not warn") end
     local typeof = function(Value) return if type(Value) == "table" and Value.IsA then "Instance" else type(Value) end
-    local task = { spawn = function(Function) Function() end, wait = function() Environment.Time += 0.1 end }
+    local task = {
+        spawn = function(Function)
+            if Environment.DelaySpawn then
+                table.insert(Environment.Scheduled, Function)
+            else
+                Function()
+            end
+        end,
+        wait = function() Environment.Time += 0.1 end,
+    }
     local os = { clock = function() return Environment.Time end }
     --!BRIDGE_SOURCE!
 end
@@ -48,7 +57,7 @@ end
 
 local Passed = 0
 for _, Mode in { "Line", "StartLine", "Both", "Ignored", "Missing", "Hidden" } do
-    local Environment = { Time = 0, Connects = 0, TazeConfig = {} }
+    local Environment = { Time = 0, Connects = 0, AstraConfig = {} }
     Environment.Game = Instance("Game", "DataModel")
     local Players = Instance("Players", "Players", Environment.Game)
     Players.LocalPlayer = Instance("TestPlayer", "Player", Players)
@@ -74,7 +83,7 @@ for _, Mode in { "Line", "StartLine", "Both", "Ignored", "Missing", "Hidden" } d
     if Mode ~= "Missing" then
         Environment.Filter = function(Kind, Options, One)
             assert(Kind == "function" and One == false)
-            assert(Options.IgnoreExecutor == false and Options.IgnoreSyn == false)
+            assert(Options.IgnoreExecutor == false and Options.IgnoreSyn == nil)
             if Mode == "Hidden" then return {} end
             local Line
             if Mode == "Both" then Line = Options.StartLine or Options.Line
@@ -85,9 +94,16 @@ for _, Mode in { "Line", "StartLine", "Both", "Ignored", "Missing", "Hidden" } d
 
     Environment.Provider = { connect = function()
         Environment.Connects += 1
-        local Socket = { OnMessage = Signal(), OnClose = Signal() }
-        function Socket:Close() self.OnClose:Fire() end
+        if Environment.ConnectFailure then error("mock connect failure") end
+        local Socket = { OnMessage = Signal(), OnClose = Signal(), IsClosed = false }
+        function Socket:Close()
+            if not self.IsClosed then
+                self.IsClosed = true
+                self.OnClose:Fire()
+            end
+        end
         function Socket:Send(Message)
+            if self.IsClosed then return end
             Environment.Message = Message
             local Id = Message:match("^(%d+)\n")
             if Environment.ServerError then
@@ -97,6 +113,7 @@ for _, Mode in { "Line", "StartLine", "Both", "Ignored", "Missing", "Hidden" } d
             end
         end
         Environment.Socket = Socket
+        if Environment.MissingEvents then Socket.OnMessage = nil end
         return Socket
     end }
 
@@ -105,7 +122,14 @@ for _, Mode in { "Line", "StartLine", "Both", "Ignored", "Missing", "Hidden" } d
     assert(Bridge.FilterLineField == Expected, "Wrong detected line field for " .. Mode)
     assert(Bridge.LineProbe == (if Mode == "Ignored" or Mode == "Missing" or Mode == "Hidden" then "fallback" else "verified"))
     assert(Environment.decompile(Target) == "return 1")
-    assert(Bridge.Version == 6 and Bridge.Decompile == Environment.decompile)
+    assert(Bridge.Version == 7 and Bridge.Decompile == Environment.decompile)
+    assert(Environment.AstraOptions.CompactArrays == true)
+    assert(Environment.AstraOptions.IncludeUpvalueIndexes == true)
+    assert(Environment.AstraOptions.CompactUpvalues == false)
+    assert(Environment.AstraOptions.UseTabs == false)
+    assert(Environment.AstraOptions.BlankLinesBetweenGroups == 1)
+    assert(Environment.AstraOptions.SpaceInsideTableBraces == true)
+    assert(Bridge.LastRequest.Options ~= Environment.AstraOptions, "Request options must be snapshots")
     assert(Environment.decompile({}) == nil, "Invalid targets must exit silently")
     assert(Environment.decompile(Target, 0) == nil, "Invalid timeouts must exit silently")
     assert(Environment.decompile(Target, 0/0) == nil, "NaN timeout must be rejected")
@@ -118,9 +142,9 @@ for _, Mode in { "Line", "StartLine", "Both", "Ignored", "Missing", "Hidden" } d
     else
         assert(Original(Target) == "original")
     end
-    assert(Environment.decompile(Target) == "return 1")
-    local Field, HexPath, Options, Bytecode = Environment.Message:match("TAZE4\n([^\n]+)\n([^\n]*)\n([^\n]*)\n(.+)$")
-    assert(Options:find('"casing":"pascal"', 1, true))
+    assert(Environment.decompile(Target) == "return 1", Mode .. ": " .. tostring(Bridge.LastError))
+    local Field, HexPath, Options, Bytecode = Environment.Message:match("ASTRA4\n([^\n]+)\n([^\n]*)\n([^\n]*)\n(.+)$")
+    assert(Options:find('"Casing":"pascal"', 1, true))
     assert(Field == Expected and Bytecode == "090300ff")
     local Path = HexPath:gsub("..", function(Pair) return string.char(tonumber(Pair, 16)) end)
     assert(Path == 'game:GetService("Players").LocalPlayer:FindFirstChild("PlayerScripts"):FindFirstChild("Quoted\\\"\\010\\255")', Path)
@@ -154,58 +178,89 @@ for _, Mode in { "Line", "StartLine", "Both", "Ignored", "Missing", "Hidden" } d
     Target.Class = "LocalScript"
     assert(Environment.decompile(Target) == "return 1")
     assert(Environment.Message:find("\n" .. Expected .. "\n\n", 1, true))
+    Target.Class = "CoreScript"
+    assert(Environment.decompile(Target) == "return 1", "Documented client-visible CoreScript bytecode was rejected")
     Target.Class = "ModuleScript"
     Environment.Socket:Close()
     assert(not Bridge.Connected)
     assert(Environment.decompile(Target) == "return 1" and Environment.Connects == 2)
+    Environment.Socket.IsClosed = true
+    assert(Environment.decompile(Target) == "return 1" and Environment.Connects == 3,
+        "IsClosed must reconnect even when the close event was not delivered")
     Environment.Socket.Send = function() error("mock send failure") end
     assert(Environment.decompile(Target) == nil, "Send failures must exit silently")
     Environment.ServerError = true
     assert(Environment.decompile(Target) == nil, "Server errors must exit silently")
     Environment.ServerError = false
     assert(Bridge.LastError == "mock server failure" and Bridge.LastRequest.Succeeded == false)
-    Environment.TazeConfig.Options = { casing = "snake", ["gc-locators"] = false }
-    assert(Environment.decompile(Target, { naming = "generic", ["require-locators"] = false }) == "return 1")
+    Environment.AstraConfig.Options = { Casing = "snake", ["IncludeGcLocators"] = false }
+    assert(Environment.decompile(Target, { Naming = "generic", ["IncludeRequireLocators"] = false }) == "return 1")
     assert(Bridge.LastError == nil and Bridge.LastRequest.Succeeded)
     assert(Bridge.LastRequest.ModulePath == "" and Bridge.LastRequest.PathStatus == "require lookups disabled")
-    assert(Bridge.LastRequest.Options.casing == "snake" and Bridge.LastRequest.Options.naming == "generic")
-    local HexOptions = Environment.Message:match("TAZE4\n[^\n]*\n[^\n]*\n([^\n]*)\n")
+    assert(Bridge.LastRequest.Options.Casing == "snake" and Bridge.LastRequest.Options.Naming == "generic")
+    local HexOptions = Environment.Message:match("ASTRA4\n[^\n]*\n[^\n]*\n([^\n]*)\n")
     local OptionBlock = HexOptions
-    assert(OptionBlock:find('"casing":"snake"', 1, true) and OptionBlock:find('"require-locators":false', 1, true), OptionBlock)
-    assert(Environment.TazeConfig.Options.naming == nil, "Per-call overrides mutated defaults")
-    Environment.TazeOptions = { casing = "camel", ["method-syntax"] = false }
-    Environment.TazeConfig = { Options = { naming = "debug" } }
+    assert(OptionBlock:find('"Casing":"snake"', 1, true) and OptionBlock:find('"IncludeRequireLocators":false', 1, true), OptionBlock)
+    assert(Environment.AstraConfig.Options.Naming == nil, "Per-call overrides mutated defaults")
+    Environment.AstraOptions = { Casing = "camel", ["MethodSyntax"] = false }
+    Environment.AstraConfig = { Options = { Naming = "debug" } }
     assert(Environment.decompile(Target) == "return 1")
-    assert(Bridge.LastRequest.Options.casing == "camel" and Bridge.LastRequest.Options.naming == "debug")
-    assert(Bridge.LastRequest.Options["method-syntax"] == false, "Replacing the global options table was ignored")
-    assert(Environment.decompile(Target, { casing = "snake;header=false" }) == nil)
+    assert(Bridge.LastRequest.Options.Casing == "camel" and Bridge.LastRequest.Options.Naming == "debug")
+    assert(Bridge.LastRequest.Options["MethodSyntax"] == false, "Replacing the global options table was ignored")
+    assert(Bridge.LastRequest.Options.CompactArrays == true, "Partial option tables lost defaults")
+    local SavedSend = Environment.Socket.Send
+    Environment.Socket.Send = function(self, Message)
+        Environment.AstraOptions.Casing = "preserve"
+        SavedSend(self, Message)
+    end
+    assert(Environment.decompile(Target) == "return 1")
+    assert(Bridge.LastRequest.Options.Casing == "camel", "A pending request's option snapshot changed")
+    Environment.Socket.Send = SavedSend
+    assert(Environment.decompile(Target) == "return 1" and Bridge.LastRequest.Options.Casing == "preserve")
+    assert(Environment.decompile(Target, { CompactArrays = false, UseTabs = true, BlankLinesBetweenGroups = 2 }) == "return 1")
+    assert(Bridge.LastRequest.Options.CompactArrays == false and Bridge.LastRequest.Options.UseTabs == true)
+    assert(Bridge.LastRequest.Options.BlankLinesBetweenGroups == 2)
+    assert(Environment.AstraOptions.CompactArrays == nil, "Per-call overrides leaked into the global table")
+    assert(Environment.decompile(Target, { MaxInputBytes = 2 }) == nil)
+    assert(Bridge.LastError:find("input byte limit", 1, true))
+    assert(Environment.decompile(Target, { MaxOutputBytes = 2 }) == nil)
+    assert(Bridge.LastError:find("output byte limit", 1, true))
+    assert(Environment.decompile(Target, { IndentWidth = 0/0 }) == nil)
+    assert(Environment.decompile(Target, { IndentWidth = math.huge }) == nil)
+    assert(Environment.decompile(Target, { BlankLinesBetweenGroups = 0.5 }) == nil)
+    assert(Environment.decompile(Target, { CompactArrays = "true" }) == nil)
+    assert(Environment.decompile(Target, { IncludeHeader = {} }) == nil)
+    assert(Environment.decompile(Target, { UnknownOption = true }) == nil)
+    assert(Environment.decompile(Target, { ModulePath = "game" }) == nil)
+    assert(Environment.decompile(Target, { FilterLineField = "Line" }) == nil)
+    assert(Environment.decompile(Target, { Casing = "snake;header=false" }) == nil)
     assert(Bridge.LastError:find("Invalid option value", 1, true))
     assert(Environment.decompile(Target, { ["module-path"] = "game" }) == nil)
-    Environment.TazeConfig.ErrorMode = "raise"
+    Environment.AstraConfig.ErrorMode = "raise"
     local Success, Failure = pcall(Environment.decompile, {})
     assert(not Success and tostring(Failure):find("Expected a script Instance", 1, true))
-    Environment.TazeConfig.ErrorMode = nil
-    Environment.TazeConfig.Options = nil
+    Environment.AstraConfig.ErrorMode = nil
+    Environment.AstraConfig.Options = nil
     local SavedWrapper
     SavedWrapper = function(...) return Implementations[SavedWrapper](...) end
     Implementations[SavedWrapper] = function() return "wrapper" end
     Environment.decompile = SavedWrapper
     local Replacement = Install(Environment)
-    assert(Environment.TazeBridge == Replacement and Replacement.Original == Original)
+    assert(Environment.AstraBridge == Replacement and Replacement.Original == Original)
     Replacement = Install(Environment)
     if Mode ~= "Missing" and Mode ~= "Hidden" then
         assert(SavedWrapper(Target) == "return 1", "Reinstallation lost a previously hooked cached wrapper")
     end
     Replacement.Stop()
     assert(Replacement.Decompile(Target) == nil, "Stopped bridges must exit silently")
-    assert(Environment.decompile == Original and Environment.TazeBridge == nil)
+    assert(Environment.decompile == Original and Environment.AstraBridge == nil)
     assert(Original(Target) == "original", "Stop did not restore the cached decompiler")
     assert(SavedWrapper(Target) == "wrapper", "Stop did not restore the cached wrapper")
-    Environment.TazeConfig.Options = { ["gc-locators"] = false }
-    Environment.TazeConfig.MaxPending = 1
+    Environment.AstraConfig.Options = { ["IncludeGcLocators"] = false }
+    Environment.AstraConfig.MaxPending = 1
     local Limited = Install(Environment)
     assert(Limited.LineProbe == "disabled", "Disabled GC lookups should skip probing")
-    assert(Limited.Decompile(Target, { ["gc-locators"] = true }) == "return 1")
+    assert(Limited.Decompile(Target, { ["IncludeGcLocators"] = true }) == "return 1")
     assert(Limited.LineProbe ~= "disabled", "Enabling GC per call should probe lazily")
     local Send = Environment.Socket.Send
     local NestedError
@@ -215,12 +270,48 @@ for _, Mode in { "Line", "StartLine", "Both", "Ignored", "Missing", "Hidden" } d
         Send(self, Message)
     end
     assert(Limited.Decompile(Target) == "return 1")
-    assert(NestedError == "Taze pending request limit reached")
+    assert(NestedError == "Astra pending request limit reached")
     Environment.Socket.Send = function() end
-    assert(Limited.Decompile(Target, 0.5) == nil and Limited.LastError == "Taze request timed out")
+    assert(Limited.Decompile(Target, 0.5) == nil and Limited.LastError == "Astra request timed out")
     Environment.Socket.Send = Send
     assert(Limited.Decompile(Target) == "return 1", "Timeout leaked pending state")
+    Environment.Socket.Send = function(self, Message)
+        local Id = Message:match("^(%d+)\n")
+        self.OnMessage:Fire(Id .. "\nok\nignored binary response", true)
+        self.OnMessage:Fire("not a response")
+        self.OnMessage:Fire("999999\nok\nstale response")
+        self.OnMessage:Fire(Id .. "\nok\nreturn 1", false)
+        self.OnMessage:Fire(Id .. "\nerror\nduplicate response")
+    end
+    assert(Limited.Decompile(Target) == "return 1", "Malformed, binary, stale, or duplicate responses changed the result")
+    Environment.Socket.Send = Send
+    Environment.Socket.Send = function(self) self.IsClosed = true end
+    local CloseTime = Environment.Time
+    assert(Limited.Decompile(Target) == nil and Environment.Time == CloseTime,
+        "A closed socket silently swallowed Send and waited for the timeout")
+    assert(Limited.Decompile(Target) == "return 1", "Closed socket did not reconnect")
     Limited.Stop()
+    Limited.Stop()
+    Environment.AstraConfig.Timeout = 0
+    assert(Install(Environment) == nil and Environment.decompile == Original,
+        "Invalid transport settings replaced the existing decompiler")
+    Environment.AstraConfig.Timeout = 1
+    Environment.ConnectFailure = true
+    assert(Install(Environment) == nil and Environment.decompile == Original,
+        "Failed connection replaced the existing decompiler")
+    Environment.ConnectFailure = nil
+    Environment.MissingEvents = true
+    assert(Install(Environment) == nil and Environment.decompile == Original)
+    assert(Environment.Socket.IsClosed == true, "Unsupported event API leaked a connection")
+    Environment.MissingEvents = nil
+    Environment.DelaySpawn = true
+    Environment.Scheduled = {}
+    assert(Install(Environment) == nil and Environment.decompile == Original,
+        "Connection timeout replaced the existing decompiler")
+    assert(#Environment.Scheduled == 1)
+    Environment.Scheduled[1]()
+    assert(Environment.Socket.IsClosed == true, "Timed-out handshake leaked a late connection")
+    Environment.DelaySpawn = nil
     Passed += 1
 end
 return Passed

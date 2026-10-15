@@ -3,7 +3,7 @@
 #include <iomanip>
 #include <locale>
 
-namespace Taze
+namespace Astra
 {
 using namespace Detail;
 
@@ -23,8 +23,8 @@ Result Decompile(std::string_view Bytecode, const Options &Settings)
     {
         std::ostringstream Header;
         Header.imbue(std::locale::classic());
-        Header << "-- Decompiled with Taze's Decompiler | Bytecode Version: " << C.Version << "\n-- Time taken: " << std::fixed
-               << std::setprecision(6) << std::chrono::duration<double>(Finished - Start).count() << "s\n\n";
+        Header << "-- Decompiled with Astra | Bytecode Version: " << C.Version << "\n-- Time taken: " << std::fixed << std::setprecision(6)
+               << std::chrono::duration<double>(Finished - Start).count() << "s\n\n";
         E.Output.Source.insert(0, Header.str());
     }
     if (E.Output.Source.size() > Settings.MaxOutputBytes)
@@ -43,4 +43,4 @@ Result Decompile(std::string_view Bytecode, const Options &Settings)
         E.Output.Stats.InstructionCount += P.Instructions.size();
     return std::move(E.Output);
 }
-} // namespace Taze
+} // namespace Astra

@@ -1,5 +1,5 @@
+#include "Astra/Decompiler.hpp"
 #include "BatchFiles.hpp"
-#include "Taze/Decompiler.hpp"
 #include "WebSocketServer.hpp"
 #include <charconv>
 #include <filesystem>
@@ -12,7 +12,7 @@ int main(int Argc, char **Argv)
 {
     try
     {
-        Taze::Options Settings;
+        Astra::Options Settings;
         std::string Input, Output;
         bool Assembly = false;
         bool Server = false;
@@ -28,12 +28,12 @@ int main(int Argc, char **Argv)
             auto Value = [&]() -> std::string
             {
                 if (++I == Argc)
-                    throw Taze::Error("Missing value for " + Arg);
+                    throw Astra::Error("Missing value for " + Arg);
                 return Argv[I];
             };
             if (Arg == "--help" || Arg == "-h")
             {
-                std::cout << "Taze Luau decompiler\nUsage: taze INPUT.luac [-o OUTPUT.luau] [options]\n\n"
+                std::cout << "Astra Luau decompiler\nUsage: astra INPUT.luac [-o OUTPUT.luau] [options]\n\n"
                              "  --serve                      Start the local WebSocket bridge (Windows)\n"
                              "  --port N                     Bridge port (default: 8877)\n"
                              "  --encoding auto|plain|roblox   Decode opcode bytes (default: auto)\n"
@@ -61,6 +61,10 @@ int main(int Argc, char **Argv)
                              "  --compact-upvalues true      Use one-line capture comments (default: multiline)\n"
                              "  --no-upvalue-indexes         Hide capture indexes in either comment style\n"
                              "  --no-group-spacing           Omit statement-group blank lines\n"
+                             "  --compact-arrays true        Shorten safe sequential array prefixes (default true)\n"
+                             "  --use-tabs true              Indent with tabs instead of spaces\n"
+                             "  --blank-lines-between-groups N  Group spacing (0..3; default 1)\n"
+                             "  --space-inside-table-braces true  Pad inline table braces (default true)\n"
                              "  --optimization-passes N      Simplification passes (0..8; default 5)\n"
                              "  --no-fallback                Fail if structured output is unavailable\n"
                              "  --max-input-bytes N          Input cap (1..268435456)\n"
@@ -88,7 +92,7 @@ int main(int Argc, char **Argv)
                 auto Text = Value();
                 auto [End, Error] = std::from_chars(Text.data(), Text.data() + Text.size(), Jobs);
                 if (Error != std::errc{} || End != Text.data() + Text.size() || Jobs > 32)
-                    throw Taze::Error("Jobs must be 0..32");
+                    throw Astra::Error("Jobs must be 0..32");
             }
             else if (Arg == "--disassemble")
                 Assembly = true;
@@ -101,7 +105,7 @@ int main(int Argc, char **Argv)
             else if (Arg == "--state-machine")
             {
                 if (I + 1 < Argc && (std::string_view(Argv[I + 1]) == "true" || std::string_view(Argv[I + 1]) == "false"))
-                    Taze::ApplyOption(Settings, "state-machine", Value());
+                    Astra::ApplyOption(Settings, "state-machine", Value());
                 else
                     Settings.ForceStateMachine = true;
             }
@@ -111,7 +115,7 @@ int main(int Argc, char **Argv)
                 std::size_t Used = 0;
                 auto Number = std::stoul(Text, &Used);
                 if (Used != Text.size() || Number == 0 || Number > 65535)
-                    throw Taze::Error("Invalid port");
+                    throw Astra::Error("Invalid port");
                 Port = unsigned(Number);
             }
             else if (Arg.starts_with("--no-"))
@@ -124,77 +128,78 @@ int main(int Argc, char **Argv)
                                                             "method-syntax",    "native-captures",
                                                             "infer-members",    "infer-calls",
                                                             "compact-upvalues", "upvalue-indexes",
-                                                            "group-spacing"};
+                                                            "group-spacing",    "compact-arrays",
+                                                            "use-tabs",         "space-inside-table-braces"};
                 auto Key = Arg.substr(5);
                 if (!Flags.count(Key))
-                    throw Taze::Error("Unknown flag " + Arg);
-                Taze::ApplyOption(Settings, Key, "false");
+                    throw Astra::Error("Unknown flag " + Arg);
+                Astra::ApplyOption(Settings, Key, "false");
             }
             else if (Arg.starts_with("--"))
-                Taze::ApplyOption(Settings, Arg.substr(2), Value());
+                Astra::ApplyOption(Settings, Arg.substr(2), Value());
             else if (Arg.starts_with('-'))
-                throw Taze::Error("Unknown option " + Arg);
+                throw Astra::Error("Unknown option " + Arg);
             else
                 Inputs.push_back(Arg);
         }
-        Taze::ValidateOptions(Settings);
+        Astra::ValidateOptions(Settings);
         if (Batch)
         {
             if (Server || Assembly || Stats || !Output.empty())
-                throw Taze::Error("--batch cannot be combined with --serve, --disassemble, --stats, or -o");
-            return Taze::DecompileFiles(Inputs, OutputDirectory, Settings, Jobs, Overwrite);
+                throw Astra::Error("--batch cannot be combined with --serve, --disassemble, --stats, or -o");
+            return Astra::DecompileFiles(Inputs, OutputDirectory, Settings, Jobs, Overwrite);
         }
         if (!OutputDirectory.empty() || Overwrite || Jobs != 1)
-            throw Taze::Error("Batch options require --batch");
+            throw Astra::Error("Batch options require --batch");
         if (Inputs.size() > 1)
-            throw Taze::Error("Multiple inputs require --batch");
+            throw Astra::Error("Multiple inputs require --batch");
         if (!Inputs.empty())
             Input = Inputs.front();
         if (Server)
         {
             if (!Input.empty() || !Output.empty() || Assembly || Stats)
-                throw Taze::Error("--serve cannot be combined with file input/output, --disassemble, or --stats");
-            return Taze::ServeWebSocket(Port, Settings);
+                throw Astra::Error("--serve cannot be combined with file input/output, --disassemble, or --stats");
+            return Astra::ServeWebSocket(Port, Settings);
         }
         if (Input.empty())
-            throw Taze::Error("Usage: taze INPUT.luac [-o OUTPUT.luau]; see --help");
+            throw Astra::Error("Usage: astra INPUT.luac [-o OUTPUT.luau]; see --help");
         if (std::filesystem::file_size(Input) > Settings.MaxInputBytes)
-            throw Taze::Error("Input exceeds configured byte limit");
+            throw Astra::Error("Input exceeds configured byte limit");
         std::ifstream File(Input, std::ios::binary);
         if (!File)
-            throw Taze::Error("Cannot open input: " + Input);
+            throw Astra::Error("Cannot open input: " + Input);
         std::string Bytes((std::istreambuf_iterator<char>(File)), {});
         std::string Source;
         if (Assembly)
-            Source = Taze::Disassemble(Bytes, Settings);
+            Source = Astra::Disassemble(Bytes, Settings);
         else
         {
-            auto Result = Taze::Decompile(Bytes, Settings);
+            auto Result = Astra::Decompile(Bytes, Settings);
             if (Stats)
-                std::cerr << "taze: decode_ms=" << Result.Stats.DecodeMilliseconds
+                std::cerr << "astra: decode_ms=" << Result.Stats.DecodeMilliseconds
                           << " reconstruct_ms=" << Result.Stats.ReconstructionMilliseconds
                           << " finalize_ms=" << Result.Stats.FinalizationMilliseconds << " instructions=" << Result.Stats.InstructionCount
                           << " symbols=" << Result.Stats.SymbolCount << " analysis_work=" << Result.Stats.AnalysisWork
                           << " fallbacks=" << Result.StateMachineFunctions << '\n';
             Source = std::move(Result.Source);
             for (const auto &Diagnostic : Result.Diagnostics)
-                std::cerr << "taze: " << Diagnostic << '\n';
+                std::cerr << "astra: " << Diagnostic << '\n';
         }
         if (Output.empty())
             std::cout << Source;
         else
         {
             if (std::filesystem::exists(Output) && std::filesystem::equivalent(Input, Output))
-                throw Taze::Error("Input and output must be different files");
+                throw Astra::Error("Input and output must be different files");
             std::ofstream Out(Output, std::ios::binary);
             if (!Out || !Out.write(Source.data(), std::streamsize(Source.size())))
-                throw Taze::Error("Cannot write output: " + Output);
+                throw Astra::Error("Cannot write output: " + Output);
         }
         return 0;
     }
     catch (const std::exception &Error)
     {
-        std::cerr << "taze: " << Error.what() << '\n';
+        std::cerr << "astra: " << Error.what() << '\n';
         return 1;
     }
 }

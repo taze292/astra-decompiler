@@ -8,7 +8,7 @@
 #include <string_view>
 #include <vector>
 
-namespace Taze
+namespace Astra
 {
 enum class OpcodeEncoding
 {
@@ -51,7 +51,11 @@ struct Options
     bool InferMemberNames = true;
     bool InferCallNames = true;
     bool CompactUpvalues = false;
+    bool CompactArrays = true;
     bool GroupSpacing = true;
+    bool UseTabs = false;
+    unsigned BlankLinesBetweenGroups = 1;
+    bool SpaceInsideTableBraces = true;
     std::string LocalPrefix = "Value";
     std::string ArgumentPrefix = "Argument";
     bool ForceStateMachine = false;
@@ -97,7 +101,8 @@ class Error : public std::runtime_error
 
 Result Decompile(std::string_view Bytecode, const Options &Settings = {});
 std::string Disassemble(std::string_view Bytecode, const Options &Settings = {});
-// Strict, shared option handling. Keys use CLI spelling without the leading '--'.
+// PascalCase API/bridge names and CLI spellings resolve to one validated key.
+std::string_view CanonicalOptionKey(std::string_view Key);
 void ApplyOption(Options &Settings, std::string_view Key, std::string_view Value);
 void ValidateOptions(const Options &Settings);
 
@@ -113,4 +118,4 @@ struct BatchResult
 // Inputs remain alive until this synchronous call returns. Results preserve input order.
 // Workers=0 selects up to 8 hardware threads; explicit worker counts are capped at 32.
 std::vector<BatchResult> DecompileBatch(std::span<const std::string_view> Inputs, const Options &Settings = {}, unsigned Workers = 1);
-} // namespace Taze
+} // namespace Astra

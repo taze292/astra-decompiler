@@ -1,13 +1,13 @@
 -- Silent live validation. Compiles recovered code; never executes game modules.
--- Inspect getgenv().TazeReadabilityValidation after execution.
+-- Inspect getgenv().AstraReadabilityValidation after execution.
 local Environment = getgenv()
-local Bridge = assert(Environment.TazeBridge, "Install the local bridge first")
+local Bridge = assert(Environment.AstraBridge, "Install the local bridge first")
 local Report = { Running = true, Passed = false, Cases = {} }
-Environment.TazeReadabilityValidation = Report
-local SavedOptions, SavedConfig = Environment.TazeOptions, Environment.TazeConfig
+Environment.AstraReadabilityValidation = Report
+local SavedOptions, SavedConfig = Environment.AstraOptions, Environment.AstraConfig
 local Ok, Failure = pcall(function()
-    Environment.TazeOptions = { header = false }
-    Environment.TazeConfig = {}
+    Environment.AstraOptions = { IncludeHeader = false }
+    Environment.AstraConfig = {}
     local Player = game:GetService("Players").LocalPlayer
     local Targets, Seen = {}, {}
     local function Add(Target)
@@ -32,7 +32,7 @@ local Ok, Failure = pcall(function()
     assert(#Targets > 0, "No readable test scripts available")
     local function Check(Target, Options)
         local Source = assert(Bridge.Decompile(Target, Options), Bridge.LastError)
-        local Compiled, Error = loadstring(Source, "TazeReadabilityValidation")
+        local Compiled, Error = loadstring(Source, "AstraReadabilityValidation")
         assert(Compiled, Target:GetFullName() .. ": " .. tostring(Error))
         return Source
     end
@@ -43,15 +43,47 @@ local Ok, Failure = pcall(function()
             ModulePath = Bridge.LastRequest.ModulePath, Variants = 1 }
         table.insert(Report.Cases, Case)
         for _, Options in {
-            { ["native-captures"] = false }, { ["method-syntax"] = false },
-            { casing = "snake", naming = "generic", ["local-prefix"] = "item", ["argument-prefix"] = "arg" },
-            { casing = "camel", ["compact-upvalues"] = false, ["group-spacing"] = false },
-            { lines = false, upvalues = false },
-            { ["gc-locators"] = false },
-            { ["require-locators"] = false, ["gc-locators"] = true },
+            { NativeCaptures = false },
+            { MethodSyntax = false },
+            {
+                Casing = "snake",
+                Naming = "generic",
+                LocalPrefix = "item",
+                ArgumentPrefix = "arg",
+            },
+            {
+                Casing = "camel",
+                CompactUpvalues = false,
+                GroupSpacing = false,
+            },
+            {
+                IncludeLineComments = false,
+                IncludeUpvalueComments = false,
+            },
+            { IncludeGcLocators = false },
+            {
+                IncludeRequireLocators = false,
+                IncludeGcLocators = true,
+            },
+            {
+                CompactArrays = false,
+                UseTabs = true,
+                BlankLinesBetweenGroups = 0,
+                SpaceInsideTableBraces = false,
+            },
+            {
+                CompactArrays = true,
+                UseTabs = false,
+                IndentWidth = 2,
+                BlankLinesBetweenGroups = 2,
+                SpaceInsideTableBraces = true,
+            },
         } do
             local Variant = Check(Target, Options)
-            if Options["require-locators"] == false then
+            for Key, Value in Options do
+                assert(Bridge.LastRequest.Options[Key] == Value, "Option was not sent: " .. Key)
+            end
+            if Options.IncludeRequireLocators == false then
                 assert(not Variant:find(" | require(", 1, true))
                 Case.GcOnly = Bridge.LastRequest.GcLookups
             end
@@ -61,9 +93,9 @@ local Ok, Failure = pcall(function()
         local Timings, Trips = {}, {}
         for Index = 1, 11 do
             local Start = os.clock()
-            local Timed = Check(Target, { header = true })
+            local Timed = Check(Target, { IncludeHeader = true })
             Trips[Index] = (os.clock() - Start) * 1000
-            assert(Timed:match("^%-%- Decompiled with Taze's Decompiler | Bytecode Version: %d+\n%-%- Time taken: [%d%.]+s\n"))
+            assert(Timed:match("^%-%- Decompiled with Astra | Bytecode Version: %d+\n%-%- Time taken: [%d%.]+s\n"))
             Timings[Index] = assert(tonumber(Timed:match("Time taken: ([%d%.]+)s"))) * 1000
         end
         table.sort(Timings) table.sort(Trips)
@@ -72,7 +104,7 @@ local Ok, Failure = pcall(function()
     end
     Report.Passed = true
 end)
-Environment.TazeOptions, Environment.TazeConfig = SavedOptions, SavedConfig
+Environment.AstraOptions, Environment.AstraConfig = SavedOptions, SavedConfig
 Report.Running = false
 Report.Error = if Ok then nil else tostring(Failure)
 return Report

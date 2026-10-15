@@ -1,6 +1,6 @@
 #include "Reconstruction.hpp"
 
-namespace Taze::Detail
+namespace Astra::Detail
 {
 Function::Function(Engine &Owner, unsigned Proto, std::vector<Upvalue> Captures, unsigned Nesting)
     : E(Owner), P(E.C.Prototypes.at(Proto)), Flow(P, E.Settings.MaxAnalysisCells, E.Analysis), Id(Proto), Depth(Nesting),
@@ -457,4 +457,4 @@ void Function::BuildDataflow()
             S.Category = "Table";
 }
 
-} // namespace Taze::Detail
+} // namespace Astra::Detail
