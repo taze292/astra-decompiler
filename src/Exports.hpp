@@ -6,6 +6,7 @@
 
 namespace Taze
 {
+struct ControlFlow;
 // A bounded symbolic graph for export annotations only. It never executes module code.
 class Exports
 {
@@ -62,7 +63,7 @@ class Exports
     bool Same(Value A, Value B) const;
 
   public:
-    unsigned Record(const Prototype &P, unsigned Proto, const std::vector<std::vector<unsigned>> &Reads,
+    unsigned Record(const Prototype &P, const ControlFlow &Flow, unsigned Proto, const std::vector<std::vector<unsigned>> &Reads,
                     const std::vector<std::vector<unsigned>> &Writes, const std::vector<unsigned> &Upvalues,
                     const std::vector<unsigned> &Parameters);
     void Closure(unsigned Symbol, unsigned Frame, unsigned Owner, unsigned Pc);

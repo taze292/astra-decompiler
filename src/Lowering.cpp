@@ -226,7 +226,7 @@ std::string Function::Closure(const Instruction &I, std::vector<Statement> &Out)
         Captures.push_back(std::move(U));
     }
     Function Nested(E, Child, std::move(Captures), Depth + 1);
-    if (!E.Settings.ModulePath.empty())
+    if (E.AnalyzeExports())
         E.ExportGraph.Closure(SymbolAt(I.A, I.Pc, true), Nested.ExportFrame, ExportFrame, I.Pc);
     auto Next = Index(I.Next);
     if (!Nested.Parameters.empty() && E.C.Prototypes[Child].Locals.empty() && Next < P.Instructions.size())
@@ -235,14 +235,17 @@ std::string Function::Closure(const Instruction &I, std::vector<Statement> &Out)
         if (Install.Op == LOP_SETTABLEKS && Install.A == I.A &&
             std::any_of(Nested.P.Instructions.begin(), Nested.P.Instructions.end(), [](const auto &Code)
                         { return Code.B == 0 && (Code.Op == LOP_NAMECALL || Code.Op == LOP_SETTABLEKS || Code.Op == LOP_GETTABLEKS); }))
+        {
             E.Symbols[Nested.Parameters.front()].Base = "Self";
+            E.Symbols[Nested.Parameters.front()].Original = "Self";
+        }
     }
     std::string Body = Nested.Generate();
     std::string Text = "function" + Nested.Signature();
     if (E.Settings.IncludeLineComments)
     {
         Text += " -- Line: " + (E.C.Prototypes[Child].Line ? std::to_string(E.C.Prototypes[Child].Line) : "Unknown");
-        if (E.Settings.IncludeFunctionLocators)
+        if (E.Settings.IncludeFunctionLocators && (E.Settings.IncludeGcLocators || E.AnalyzeExports()))
             Text += " | " + Nested.Locator();
     }
     Text += "\n" + Body + "end";
@@ -326,8 +329,7 @@ void Function::Simple(const Instruction &I, std::vector<Statement> &Out)
         if (!Name.empty() && !E.Symbols[S].Keep)
         {
             auto Nice = E.New(Name, Id, Keep);
-            E.Symbols[S].Name = E.Symbols[Nice].Name;
-            E.Symbols[S].Base = E.Symbols[Nice].Base;
+            E.Rename(S, Nice);
             E.Symbols[S].Keep = Keep;
         }
     };
@@ -466,8 +468,7 @@ void Function::Simple(const Instruction &I, std::vector<Statement> &Out)
             (E.Symbols[S].Name.starts_with("Value") || (Identifier(FunctionName) && E.Symbols[S].Base == Pascal(FunctionName))))
         {
             unsigned Nice = E.New(FunctionName, Id, true, false, false, true);
-            E.Symbols[S].Name = E.Symbols[Nice].Name;
-            E.Symbols[S].Base = E.Symbols[Nice].Base;
+            E.Rename(S, Nice);
         }
         Set(Closure(I, Out));
         break;
@@ -546,8 +547,7 @@ void Function::Simple(const Instruction &I, std::vector<Statement> &Out)
                     if (!E.Symbols[S].Keep)
                     {
                         auto New = E.New(P.Constants[unsigned(Arg.D)].Text, Id, true);
-                        E.Symbols[S].Name = E.Symbols[New].Name;
-                        E.Symbols[S].Base = E.Symbols[New].Base;
+                        E.Rename(S, New);
                         E.Symbols[S].Keep = true;
                     }
                 }

@@ -816,6 +816,7 @@ std::string OpcodeName(LuauOpcode Op)
 
 std::string Disassemble(std::string_view Bytecode, const Options &Settings)
 {
+    ValidateOptions(Settings);
     auto C = ReadBytecode(Bytecode, Settings);
     std::ostringstream Out;
     Out << "; Bytecode v" << C.Version << ", types v" << C.Types << "\n";
@@ -850,6 +851,9 @@ std::string Disassemble(std::string_view Bytecode, const Options &Settings)
                 Out << "        CAPTURE " << Kind << " " << Index << '\n';
         }
     }
-    return Out.str();
+    auto Text = Out.str();
+    if (Text.size() > Settings.MaxOutputBytes)
+        throw Error("Disassembly exceeds output limit");
+    return Text;
 }
 } // namespace Taze

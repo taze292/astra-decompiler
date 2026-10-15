@@ -13,7 +13,7 @@ struct ControlFlow
     std::vector<std::bitset<256>> LiveIn;
     std::vector<unsigned> Blocks;
 
-    explicit ControlFlow(const Prototype &Proto);
+    explicit ControlFlow(const Prototype &Proto, std::size_t MaxCells);
     bool Dominates(unsigned Header, unsigned Node) const;
 };
 

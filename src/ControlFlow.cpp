@@ -180,10 +180,10 @@ std::vector<int> ImmediateDominators(const std::vector<std::vector<unsigned>> &E
 }
 } // namespace
 
-ControlFlow::ControlFlow(const Prototype &P)
+ControlFlow::ControlFlow(const Prototype &P, std::size_t MaxCells)
 {
     unsigned Count = unsigned(P.Instructions.size());
-    if (std::uint64_t(Count) * std::max(1u, P.Stack) > 16000000)
+    if (std::uint64_t(Count) * std::max(1u, P.Stack) > MaxCells)
         throw Error("Function control-flow exceeds analysis limit");
     Successors.resize(Count + 1);
     Predecessors.resize(Count + 1);

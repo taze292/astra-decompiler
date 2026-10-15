@@ -4,6 +4,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <set>
 
 int main(int Argc, char **Argv)
 {
@@ -13,6 +14,7 @@ int main(int Argc, char **Argv)
         std::string Input, Output;
         bool Assembly = false;
         bool Server = false;
+        bool Stats = false;
         unsigned Port = 8877;
         for (int I = 1; I < Argc; ++I)
         {
@@ -37,41 +39,35 @@ int main(int Argc, char **Argv)
                              "  --no-filtergc                Omit inline function lookup expressions\n"
                              "  --filter-line Line|StartLine  Select the executor's filtergc line field\n"
                              "  --module-path EXPR           Module Instance expression for require lookups\n"
-                             "  --no-upvalues                Omit capture comments\n";
+                             "  --no-upvalues                Omit capture comments\n"
+                             "  --casing pascal|camel|snake|preserve\n"
+                             "  --naming inferred|debug|generic\n"
+                             "  --no-gc-locators             Omit filtergc lookups only\n"
+                             "  --no-require-locators        Omit require lookups only\n"
+                             "  --no-type-names              Use ValueN for anonymous locals\n"
+                             "  --no-preserve-function-names Apply casing to function bindings too\n"
+                             "  --optimization-passes N      Simplification passes (0..8; default 5)\n"
+                             "  --no-fallback                Fail if structured output is unavailable\n"
+                             "  --max-input-bytes N          Input cap (1..268435456)\n"
+                             "  --max-output-bytes N         Source cap (1..268435456)\n"
+                             "  --max-analysis-cells N       Per-function analysis cap (1..64000000)\n"
+                             "  --max-nesting N              Closure nesting cap (1..128)\n"
+                             "  --stats                      Print stage timings and counts to stderr\n"
+                             "Boolean options also accept --KEY true|false. See docs/OPTIONS.md.\n";
                 return 0;
             }
             if (Arg == "-o" || Arg == "--output")
                 Output = Value();
-            else if (Arg == "--encoding")
-            {
-                auto Encoding = Value();
-                if (Encoding == "plain")
-                    Settings.Encoding = Taze::OpcodeEncoding::Plain;
-                else if (Encoding == "roblox")
-                    Settings.Encoding = Taze::OpcodeEncoding::Roblox;
-                else if (Encoding != "auto")
-                    throw Taze::Error("Unknown encoding " + Encoding);
-            }
-            else if (Arg == "--indent")
-                Settings.IndentWidth = unsigned(std::stoul(Value()));
-            else if (Arg == "--no-header")
-                Settings.IncludeHeader = false;
-            else if (Arg == "--no-lines")
-                Settings.IncludeLineComments = false;
-            else if (Arg == "--no-upvalues")
-                Settings.IncludeUpvalueComments = false;
-            else if (Arg == "--no-filtergc")
-                Settings.IncludeFunctionLocators = false;
-            else if (Arg == "--filter-line")
-                Settings.FilterLineField = Value();
-            else if (Arg == "--module-path")
-                Settings.ModulePath = Value();
-            else if (Arg == "--state-machine")
-                Settings.ForceStateMachine = true;
             else if (Arg == "--disassemble")
                 Assembly = true;
             else if (Arg == "--serve")
                 Server = true;
+            else if (Arg == "--stats")
+                Stats = true;
+            else if (Arg == "--no-filtergc")
+                Settings.IncludeFunctionLocators = false;
+            else if (Arg == "--state-machine")
+                Settings.ForceStateMachine = true;
             else if (Arg == "--port")
             {
                 auto Text = Value();
@@ -81,6 +77,15 @@ int main(int Argc, char **Argv)
                     throw Taze::Error("Invalid port");
                 Port = unsigned(Number);
             }
+            else if (Arg.starts_with("--no-"))
+            {
+                static const std::set<std::string> Flags = {"header", "lines", "upvalues", "locators", "gc-locators", "require-locators", "type-names", "preserve-function-names", "fallback"};
+                auto Key = Arg.substr(5);
+                if (!Flags.count(Key)) throw Taze::Error("Unknown flag " + Arg);
+                Taze::ApplyOption(Settings, Key, "false");
+            }
+            else if (Arg.starts_with("--"))
+                Taze::ApplyOption(Settings, Arg.substr(2), Value());
             else if (Arg.starts_with('-'))
                 throw Taze::Error("Unknown option " + Arg);
             else if (Input.empty())
@@ -88,18 +93,17 @@ int main(int Argc, char **Argv)
             else
                 throw Taze::Error("Expected exactly one input file");
         }
+        Taze::ValidateOptions(Settings);
         if (Server)
         {
             if (!Input.empty() || !Output.empty() || Assembly)
                 throw Taze::Error("--serve cannot be combined with file input/output or --disassemble");
-            if (Settings.IndentWidth < 1 || Settings.IndentWidth > 16)
-                throw Taze::Error("Indent must be between 1 and 16");
             return Taze::ServeWebSocket(Port, Settings);
         }
         if (Input.empty())
             throw Taze::Error("Usage: taze INPUT.luac [-o OUTPUT.luau]; see --help");
         if (std::filesystem::file_size(Input) > Settings.MaxInputBytes)
-            throw Taze::Error("Input exceeds 64 MiB limit");
+            throw Taze::Error("Input exceeds configured byte limit");
         std::ifstream File(Input, std::ios::binary);
         if (!File)
             throw Taze::Error("Cannot open input: " + Input);
@@ -110,6 +114,12 @@ int main(int Argc, char **Argv)
         else
         {
             auto Result = Taze::Decompile(Bytes, Settings);
+            if (Stats)
+                std::cerr << "taze: decode_ms=" << Result.Stats.DecodeMilliseconds
+                          << " reconstruct_ms=" << Result.Stats.ReconstructionMilliseconds
+                          << " finalize_ms=" << Result.Stats.FinalizationMilliseconds
+                          << " instructions=" << Result.Stats.InstructionCount << " symbols=" << Result.Stats.SymbolCount
+                          << " fallbacks=" << Result.StateMachineFunctions << '\n';
             Source = std::move(Result.Source);
             for (const auto &Diagnostic : Result.Diagnostics)
                 std::cerr << "taze: " << Diagnostic << '\n';

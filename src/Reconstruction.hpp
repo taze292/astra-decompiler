@@ -19,6 +19,7 @@ namespace Taze::Detail
 {
 bool Identifier(std::string_view Text);
 std::string Pascal(std::string_view Text);
+std::string CaseName(std::string_view Text, VariableCase Casing);
 std::string Token(unsigned Id);
 std::vector<unsigned> Tokens(const std::string &Text);
 void Replace(std::string &Text, const std::string &From, const std::string &To);
@@ -68,6 +69,9 @@ struct Symbol
     unsigned Owner = 0;
     bool ReferenceAlias = false;
     std::string Category = {};
+    std::string Original;
+    bool Preserve = false;
+    bool Debug = false;
 };
 struct Upvalue
 {
@@ -151,7 +155,9 @@ class Engine
     unsigned NextValue = 0;
 
     Engine(const Chunk &Bytecode, const Options &Options);
-    unsigned New(std::string Name, unsigned Owner, bool Keep = false, bool Parameter = false, bool Cell = false, bool Preserve = false);
+    unsigned New(std::string Name, unsigned Owner, bool Keep = false, bool Parameter = false, bool Cell = false, bool Preserve = false, bool Debug = false);
+    void Rename(unsigned Target, unsigned Source);
+    bool AnalyzeExports() const;
     std::string Resolve(std::string Text);
     void Budget(std::size_t Amount);
 };

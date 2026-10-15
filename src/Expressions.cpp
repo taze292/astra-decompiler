@@ -38,6 +38,45 @@ std::string Pascal(std::string_view Text)
     return Out;
 }
 
+std::string CaseName(std::string_view Text, VariableCase Casing)
+{
+    std::string Out;
+    if (Casing == VariableCase::Preserve && Identifier(Text))
+        return std::string(Text);
+    if (Casing == VariableCase::Snake)
+    {
+        for (std::size_t I = 0; I < Text.size(); ++I)
+        {
+            unsigned char C = Text[I];
+            if (C >= 128 || !std::isalnum(C))
+            {
+                if (!Out.empty() && Out.back() != '_') Out += '_';
+                continue;
+            }
+            bool Boundary = I > 0 && std::isupper(C) &&
+                (std::islower(static_cast<unsigned char>(Text[I - 1])) || std::isdigit(static_cast<unsigned char>(Text[I - 1])) ||
+                 (std::isupper(static_cast<unsigned char>(Text[I - 1])) && I + 1 < Text.size() && std::islower(static_cast<unsigned char>(Text[I + 1]))));
+            if (Boundary && !Out.empty() && Out.back() != '_') Out += '_';
+            Out += char(std::tolower(C));
+        }
+        while (!Out.empty() && Out.back() == '_') Out.pop_back();
+        if (Out.empty()) Out = "value";
+        if (std::isdigit(static_cast<unsigned char>(Out.front()))) Out = "value_" + Out;
+    }
+    else
+    {
+        Out = Pascal(Text);
+        if (Casing == VariableCase::Camel)
+            for (std::size_t I = 0; I < Out.size() && std::isupper(static_cast<unsigned char>(Out[I])); ++I)
+            {
+                if (I > 0 && I + 1 < Out.size() && std::islower(static_cast<unsigned char>(Out[I + 1]))) break;
+                Out[I] = char(std::tolower(static_cast<unsigned char>(Out[I])));
+            }
+    }
+    if (!Identifier(Out)) Out += '_';
+    return Out;
+}
+
 std::string Token(unsigned Id)
 {
     return '\x1f' + std::to_string(Id) + '\x1e';

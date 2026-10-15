@@ -212,11 +212,13 @@ std::string Function::Generate(bool Main)
     }
     catch (const Unstructured &Reason)
     {
+        if (!E.Settings.AllowFallback)
+            throw Error("Function " + std::to_string(Id) + ": structuring failed (" + Reason.what() + ")");
         E.Output.Diagnostics.push_back("Function " + std::to_string(Id) + ": state machine (" + Reason.what() + ")");
         E.Output.StateMachineFunctions++;
         Nodes = StateMachine();
     }
-    for (unsigned Pass = 0; Pass < 5; ++Pass)
+    for (unsigned Pass = 0; Pass < E.Settings.OptimizationPasses; ++Pass)
         Optimize(Nodes);
     // Remove the compiler's implicit empty return at the end of a chunk/function.
     if (!Nodes.empty() && Nodes.back().Type == Kind::Return && Nodes.back().Text.empty())

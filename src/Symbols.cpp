@@ -18,8 +18,9 @@ Engine::Engine(const Chunk &Bytecode, const Options &Options) : C(Bytecode), Set
         Names.insert(Name);
     GlobalNames = Names;
 }
-unsigned Engine::New(std::string Name, unsigned Owner, bool Keep, bool Parameter, bool Cell, bool Preserve)
+unsigned Engine::New(std::string Name, unsigned Owner, bool Keep, bool Parameter, bool Cell, bool Preserve, bool Debug)
 {
+    std::string Original = Name;
     if (Name.starts_with("Value") && Name.size() > 5 &&
         std::all_of(Name.begin() + 5, Name.end(), [](unsigned char C) { return std::isdigit(C); }))
         Name = "Value" + std::to_string(++NextValue);
@@ -30,16 +31,35 @@ unsigned Engine::New(std::string Name, unsigned Owner, bool Keep, bool Parameter
         Name = Base + std::to_string(Suffix++);
     Names.insert(Name);
     unsigned Id = unsigned(Symbols.size());
-    Symbols.push_back({Name, Base, Keep, Parameter, Cell, Owner});
+    Symbols.push_back({Name, Base, Keep, Parameter, Cell, Owner, false, {}, std::move(Original), Preserve, Debug});
     return Id;
+}
+void Engine::Rename(unsigned Target, unsigned Source)
+{
+    auto &S = Symbols[Target];
+    const auto &From = Symbols[Source];
+    S.Name = From.Name;
+    S.Base = From.Base;
+    S.Original = From.Original;
+    S.Preserve = From.Preserve;
+    S.Debug = From.Debug;
+}
+bool Engine::AnalyzeExports() const
+{
+    return Settings.IncludeLineComments && Settings.IncludeFunctionLocators && Settings.IncludeRequireLocators && !Settings.ModulePath.empty();
 }
 std::string Engine::Resolve(std::string Text)
 {
-    auto Paths = Settings.ModulePath.empty() ? std::map<unsigned, std::string>{} : ExportGraph.Find(MainExportFrame);
+    auto Paths = AnalyzeExports() ? ExportGraph.Find(MainExportFrame) : std::map<unsigned, std::string>{};
     for (const auto &[Proto, Fallback] : Locators)
     {
         auto It = Paths.find(Proto);
-        auto Lookup = It == Paths.end() ? Fallback : "require(" + Settings.ModulePath + ")" + It->second;
+        auto Lookup = It == Paths.end() ? (Settings.IncludeGcLocators ? Fallback : "") : "require(" + Settings.ModulePath + ")" + It->second;
+        if (Lookup.empty())
+        {
+            Replace(Text, " | \x1d" + std::to_string(Proto) + "\x1c", "");
+            continue;
+        }
         Replace(Text, "\x1d" + std::to_string(Proto) + "\x1c", Lookup);
     }
     auto References = Tokens(Text);
@@ -68,9 +88,10 @@ std::string Engine::Resolve(std::string Text)
             std::string Base = S.Base;
             bool Generic = Base.starts_with("Value") && Base.size() > 5 &&
                            std::all_of(Base.begin() + 5, Base.end(), [](unsigned char C) { return std::isdigit(C); });
+            Generic = Generic || Settings.Naming == VariableNaming::Generic || (Settings.Naming == VariableNaming::Debug && !S.Debug && !S.Preserve);
             if (Generic)
             {
-                const auto Prefix = S.Category.empty() ? "Value" : S.Category;
+                const auto Prefix = CaseName(S.Parameter ? "Argument" : (!Settings.UseTypeNames || S.Category.empty() ? "Value" : S.Category), Settings.Casing);
                 do
                 {
                     S.Name = Prefix + std::to_string(++Counters[Prefix]);
@@ -78,6 +99,7 @@ std::string Engine::Resolve(std::string Text)
             }
             else
             {
+                Base = S.Preserve && Settings.PreserveFunctionNames && Identifier(S.Original) ? S.Original : CaseName(S.Original, Settings.Casing);
                 S.Name = Base;
                 unsigned Suffix = 2;
                 while (Taken.count(S.Name))

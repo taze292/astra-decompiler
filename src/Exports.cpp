@@ -41,13 +41,12 @@ void Exports::Closure(unsigned Symbol, unsigned Frame, unsigned Owner, unsigned 
     Frames[Frame].CreationPc = Pc;
 }
 
-unsigned Exports::Record(const Prototype &P, unsigned Proto, const std::vector<std::vector<unsigned>> &Reads,
+unsigned Exports::Record(const Prototype &P, const ControlFlow &Flow, unsigned Proto, const std::vector<std::vector<unsigned>> &Reads,
                          const std::vector<std::vector<unsigned>> &Written, const std::vector<unsigned> &Upvalues,
                          const std::vector<unsigned> &Parameters)
 {
     unsigned FrameId = unsigned(Frames.size());
     Frames.push_back({Proto, Parameters, {}});
-    ControlFlow Flow(P);
     auto Certain = [&](unsigned Index)
     {
         for (unsigned J = 0; J < P.Instructions.size(); ++J)

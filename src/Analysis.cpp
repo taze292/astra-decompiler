@@ -3,10 +3,10 @@
 namespace Taze::Detail
 {
 Function::Function(Engine &Owner, unsigned Proto, std::vector<Upvalue> Captures, unsigned Nesting)
-    : E(Owner), P(E.C.Prototypes.at(Proto)), Flow(P), Id(Proto), Depth(Nesting), Upvalues(std::move(Captures))
+    : E(Owner), P(E.C.Prototypes.at(Proto)), Flow(P, E.Settings.MaxAnalysisCells), Id(Proto), Depth(Nesting), Upvalues(std::move(Captures))
 {
-    if (Depth > 128)
-        throw Error("Function nesting exceeds 128 levels");
+    if (Depth > E.Settings.MaxNesting)
+        throw Error("Function nesting exceeds configured limit");
     for (const auto &I : P.Instructions)
         for (auto [Kind, R] : I.Captures)
             if (Kind == LCT_REF)
@@ -14,13 +14,15 @@ Function::Function(Engine &Owner, unsigned Proto, std::vector<Upvalue> Captures,
     for (unsigned R = 0; R < P.Stack; ++R)
     {
         std::string Name = R < P.Parameters ? "Argument" + std::to_string(R + 1) : "Value" + std::to_string(R + 1);
+        bool Debug = false;
         for (const auto &L : P.Locals)
             if (L.Register == R && ((R < P.Parameters && L.Start <= 1) || Cells.count(R)))
             {
                 Name = L.Name;
+                Debug = true;
                 break;
             }
-        Registers.push_back(E.New(Name, Id, R < P.Parameters, R < P.Parameters, Cells.count(R) != 0));
+        Registers.push_back(E.New(Name, Id, R < P.Parameters, R < P.Parameters, Cells.count(R) != 0, false, Debug));
         if (R < P.Parameters)
             Parameters.push_back(Registers.back());
     }
@@ -50,7 +52,7 @@ Function::Function(Engine &Owner, unsigned Proto, std::vector<Upvalue> Captures,
                 L.Register >= I.A + 3)
                 Start = L.Start;
         LocalStarts.push_back(Start);
-        LocalSymbols.push_back(Cells.count(L.Register) ? Registers[L.Register] : E.New(L.Name, Id, true));
+        LocalSymbols.push_back(Cells.count(L.Register) ? Registers[L.Register] : E.New(L.Name, Id, true, false, false, false, true));
     }
     PackSymbol = E.New("Results", Id, true);
     TopSymbol = E.New("ResultBase", Id, true);
@@ -58,7 +60,7 @@ Function::Function(Engine &Owner, unsigned Proto, std::vector<Upvalue> Captures,
     while (Upvalues.size() < P.Upvalues)
         throw Error("Main prototype has unbound upvalues");
     BuildDataflow();
-    if (!E.Settings.ModulePath.empty())
+    if (E.AnalyzeExports())
     {
         std::vector<unsigned> Captures;
         for (const auto &U : Upvalues)
@@ -66,7 +68,7 @@ Function::Function(Engine &Owner, unsigned Proto, std::vector<Upvalue> Captures,
             auto Refs = Tokens(U.Value);
             Captures.push_back(!U.Reference && Refs.size() == 1 ? Refs.front() : std::numeric_limits<unsigned>::max());
         }
-        ExportFrame = E.ExportGraph.Record(P, Id, ReadSymbols, WriteSymbols, Captures, Parameters);
+        ExportFrame = E.ExportGraph.Record(P, Flow, Id, ReadSymbols, WriteSymbols, Captures, Parameters);
         if (Depth == 0)
             E.MainExportFrame = ExportFrame;
     }
@@ -75,7 +77,7 @@ Function::Function(Engine &Owner, unsigned Proto, std::vector<Upvalue> Captures,
 void Function::BuildDataflow()
 {
     const unsigned Count = unsigned(P.Instructions.size());
-    if (std::uint64_t(Count) * P.Stack > 16000000)
+    if (std::uint64_t(Count) * P.Stack > E.Settings.MaxAnalysisCells)
         throw Error("Function dataflow exceeds analysis limit");
     std::vector<unsigned> Parent;
     auto New = [&]()

@@ -14,7 +14,7 @@ if(NOT EXISTS "${TAZE_LUAU_DIR}/Common/include/Luau/Bytecode.h")
 endif()
 
 add_library(TazeDecompiler
-    src/Bytecode.cpp src/ControlFlow.cpp src/Exports.cpp src/Decompiler.cpp
+    src/Bytecode.cpp src/ControlFlow.cpp src/Exports.cpp src/Decompiler.cpp src/Options.cpp
     src/Expressions.cpp src/Symbols.cpp src/Analysis.cpp src/Lowering.cpp
     src/Structure.cpp src/Optimize.cpp src/Render.cpp)
 target_include_directories(TazeDecompiler PUBLIC include PRIVATE "${TAZE_LUAU_DIR}/Common/include")
@@ -42,6 +42,9 @@ if(TAZE_BUILD_TESTS)
     target_include_directories(taze-tests PRIVATE "${TAZE_LUAU_DIR}/Common/include")
     target_compile_definitions(taze-tests PRIVATE TAZE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     add_test(NAME RoundTrip COMMAND taze-tests)
+    add_executable(taze-pipeline-tests tests/PipelineTests.cpp)
+    target_link_libraries(taze-pipeline-tests PRIVATE TazeDecompiler Luau.Compiler Luau.VM)
+    add_test(NAME Pipeline COMMAND taze-pipeline-tests)
     add_executable(taze-compile tools/Compile.cpp)
     target_link_libraries(taze-compile PRIVATE Luau.Compiler Luau.VM)
     if(WIN32)
