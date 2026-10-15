@@ -64,4 +64,4 @@ Legacy raw, TAZE2 metadata, and TAZE3 hex-encoded semicolon options remain suppo
 5. Install the local bridge and run `tools/TestCameraModule.luau` through Roblox MCP; run the behavioral harness separately.
 6. Record actual results and limitations, then commit a coherent local milestone. Publishing is a separate user-directed action.
 
-See [the original rewrite plan](REWRITE_PLAN.md), [configuration](OPTIONS.md), [performance](PERFORMANCE.md), and [validation history](VALIDATION.md).
+See [the original rewrite plan](REWRITE_PLAN.md), [configuration](OPTIONS.md), [performance](PERFORMANCE.md), [validation history](VALIDATION.md), and the [whole-game control-flow audit](UNIVERSAL_CONTROL_FLOW.md) for loop/predicate reconstruction proofs and current coverage.

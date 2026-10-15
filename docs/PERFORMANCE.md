@@ -1,5 +1,9 @@
 # Rewrite measurements
 
+## Whole-game reconstruction follow-up — 2026-10-15
+
+Against `bcf0d4a`, a representative nonlinear predicate case now avoids fallback and decompiles about **2.4 times as fast**. Four alternating-order 300-sample runs also measured small-input regressions: 3.3% on captured CameraModule, 0.7% on the 201-function corpus, 7.2% on the capture fixture, and 6.1% on a linear condition fixture. Additional correctness analysis is not free. The full results, live coverage, and interrupted final MCP sweep are documented in [UNIVERSAL_CONTROL_FLOW.md](UNIVERSAL_CONTROL_FLOW.md); older entries below describe previous milestones.
+
 ## ClientLoader lifetime correction — 2026-10-15
 
 The false fallback on live ClientLoader is fixed: clean output shrank **86.7%**, from 30,532 to 4,076 bytes, without reference boxes. A separate 200-sample core comparison against `ad2d5f6` measured **5.3%** lower median time for the locally compiled reference, **9.3%** for captured CameraModule, and **2.5%** for the 201-function corpus. These are distinct inputs; no live-bytecode core benchmark is claimed for ClientLoader. See [CONTROL_FLOW_AUDIT.md](CONTROL_FLOW_AUDIT.md) for full scope and artifacts.
