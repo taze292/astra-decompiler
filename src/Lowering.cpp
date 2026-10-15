@@ -188,11 +188,7 @@ std::string Function::Closure(const Instruction &I, std::vector<Statement> &Out)
             if (Self.empty())
             {
                 auto Destination = SymbolAt(I.A, I.Pc, true);
-                unsigned Definitions = E.Symbols[Destination].Parameter ? 1u : 0u;
-                for (const auto &Code : P.Instructions)
-                    for (auto Reg : Writes(Code, P))
-                        if (SymbolAt(Reg, Code.Pc, true) == Destination)
-                            ++Definitions;
+                unsigned Definitions = DefinitionCounts[Destination];
                 SelfSymbol = !Dispatch && !E.Symbols[Destination].Cell && Definitions == 1
                                  ? Destination
                                  : E.New(E.C.Prototypes[Child].Name.empty() ? "RecursiveFunction" : E.C.Prototypes[Child].Name, Id, true,
@@ -207,15 +203,8 @@ std::string Function::Closure(const Instruction &I, std::vector<Statement> &Out)
         if (Kind == LCT_VAL && !Cells.count(R))
         {
             unsigned S = SymbolAt(R, I.Pc);
-            unsigned Definitions = E.Symbols[S].Parameter ? 1u : 0u;
-            for (const auto &Code : P.Instructions)
-                for (unsigned Reg : Writes(Code, P))
-                    if (SymbolAt(Reg, Code.Pc, true) == S)
-                        Definitions++;
-            bool Loop = false;
-            for (const auto &Code : P.Instructions)
-                if (Code.Target() >= 0 && Code.Target() <= int(I.Pc) && Code.Pc >= I.Pc && Code.Target() < int(Code.Pc))
-                    Loop = true;
+            unsigned Definitions = DefinitionCounts[S];
+            bool Loop = LoopCaptures[Index(I.Pc)];
             if (Definitions == 1 && !Loop)
             {
                 U.Value = Read(R, I.Pc);
@@ -333,11 +322,11 @@ void Function::Simple(const Instruction &I, std::vector<Statement> &Out)
     auto R = [&](unsigned Reg) { return Read(Reg, I.Pc); };
     auto Emit = [&](std::string Text) { Out.push_back({Kind::Raw, {}, std::move(Text)}); };
     auto Set = [&](std::string Text, bool Pure = false, bool Call = false) { Out.push_back(Assign(I.A, I, std::move(Text), Pure, Call)); };
-    auto Hint = [&](std::string Name, bool Keep = false)
+    auto Hint = [&](std::string Name, bool Keep = false, bool Enabled = true)
     {
         unsigned S = SymbolAt(I.A, I.Pc, true);
         Hints[S] = Name;
-        if (!Name.empty() && !E.Symbols[S].Keep)
+        if (Enabled && !Name.empty() && !E.Symbols[S].Keep)
         {
             auto Nice = E.New(Name, Id, Keep);
             E.Rename(S, Nice);
@@ -454,7 +443,7 @@ void Function::Simple(const Instruction &I, std::vector<Statement> &Out)
     {
         unsigned Key = I.Op == LOP_GETUDATAKS ? I.Aux & 65535 : I.Aux;
         auto Name = P.Constants[Key].Text;
-        Hint(Name == "new" ? Hints[SymbolAt(I.B, I.Pc)] + ".new" : Name);
+        Hint(Name == "new" ? Hints[SymbolAt(I.B, I.Pc)] + ".new" : Name, false, E.Settings.InferMemberNames);
         Set(Member(R(I.B), Key));
         break;
     }
@@ -548,8 +537,8 @@ void Function::Simple(const Instruction &I, std::vector<Statement> &Out)
                 ResultHint = Hints[SymbolAt(Start, I.Pc)];
         }
         if (!ResultHint.empty())
-            Hint(ResultHint, I.C == 2);
-        if (Method && PendingMethod == "GetService" && I.C == 2 && I.B == 3)
+            Hint(ResultHint, I.C == 2, E.Settings.InferCallNames);
+        if (E.Settings.InferCallNames && Method && PendingMethod == "GetService" && I.C == 2 && I.B == 3)
         {
             auto Previous = Index(I.Pc);
             if (Previous)

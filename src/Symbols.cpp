@@ -93,12 +93,16 @@ std::string Engine::Resolve(std::string Text)
             std::string Base = S.Name;
             bool Generic = Base.starts_with("Value") && Base.size() > 5 &&
                            std::all_of(Base.begin() + 5, Base.end(), [](unsigned char C) { return std::isdigit(C); });
+            Generic = Generic || (S.Parameter && !S.Debug && Base.starts_with("Argument") && Base.size() > 8 &&
+                                  std::all_of(Base.begin() + 8, Base.end(), [](unsigned char C) { return std::isdigit(C); }));
             Generic = Generic || Settings.Naming == VariableNaming::Generic ||
                       (Settings.Naming == VariableNaming::Debug && !S.Debug && !S.Preserve);
             if (Generic)
             {
-                const auto Prefix = CaseName(
-                    S.Parameter ? "Argument" : (!Settings.UseTypeNames || S.Category.empty() ? "Value" : S.Category), Settings.Casing);
+                const auto Prefix =
+                    CaseName(S.Parameter ? Settings.ArgumentPrefix
+                                         : (!Settings.UseTypeNames || S.Category.empty() ? Settings.LocalPrefix : S.Category),
+                             Settings.Casing);
                 do
                 {
                     S.Name = Prefix + std::to_string(++Counters[Prefix]);

@@ -157,6 +157,38 @@ return answer, text, count, x, y, recurse(5), string.upper("literal"), callbacks
                   "Method receiver was not made implicit");
         }
         Debug.debugLevel = 2;
+        {
+            auto Input = Luau::compile("local n=2; local function bump() n+=1 end; bump(); return n");
+            for (bool Compact : {false, true})
+                for (bool Spacing : {false, true})
+                {
+                    Taze::Options O;
+                    O.CompactUpvalues = Compact;
+                    O.GroupSpacing = Spacing;
+                    O.InferCallNames = false;
+                    O.InferMemberNames = false;
+                    O.Naming = Taze::VariableNaming::Generic;
+                    O.LocalPrefix = "item";
+                    O.ArgumentPrefix = "arg";
+                    O.Casing = Taze::VariableCase::Preserve;
+                    auto Text = Taze::Decompile(Input, O).Source;
+                    Check(Execute(Luau::compile(Text)) == Execute(Input), "Formatting/naming changed capture behavior");
+                    Check((Text.find("-- Upvalues:") != std::string::npos) == Compact, "Capture comment style ignored");
+                }
+            for (const char *Prefix : {"", "1bad", "bad.name", "bad-name", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"})
+            {
+                Taze::Options O;
+                O.LocalPrefix = Prefix;
+                Reject([&] { Taze::Decompile(Input, O); });
+            }
+            Taze::Options O;
+            O.ArgumentPrefix = "arg";
+            O.LocalPrefix = "temp";
+            O.UseTypeNames = false;
+            O.Casing = Taze::VariableCase::Camel;
+            auto Function = Luau::compile("return function(input) return input+1 end");
+            Check(Taze::Decompile(Function, O).Source.find("arg1") != std::string::npos, "Anonymous argument prefix ignored");
+        }
         auto Bytes = Luau::compile(
             "local user_value = 9; local function mixedCaseFunction() return user_value end; return mixedCaseFunction", Debug);
         Taze::Options S;
@@ -217,7 +249,13 @@ return answer, text, count, x, y, recurse(5), string.upper("literal"), callbacks
         S.ForceStateMachine = true;
         S.AllowFallback = false;
         Reject([&] { Taze::Decompile(Bytes, S); });
-        auto Result = Taze::Decompile(Bytes);
+        Taze::Options Deterministic;
+        Deterministic.IncludeHeader = false;
+        auto Header = Taze::Decompile(Bytes).Source;
+        Check(Header.starts_with("-- Decompiled with Taze's Decompiler | Bytecode Version: ") &&
+                  Header.find("\n-- Time taken: ") != std::string::npos,
+              "Header format differs");
+        auto Result = Taze::Decompile(Bytes, Deterministic);
         Check(Result.Stats.InputBytes == Bytes.size() && Result.Stats.InstructionCount > 0 && Result.Stats.SymbolCount > 0,
               "Missing statistics");
         std::vector<std::string_view> Inputs(19, Bytes);
@@ -226,7 +264,7 @@ return answer, text, count, x, y, recurse(5), string.upper("literal"), callbacks
         for (unsigned Workers : {1u, 2u, 4u, 0u, 32u})
             for (unsigned Repeat = 0; Repeat < 3; ++Repeat)
             {
-                auto Results = Taze::DecompileBatch(Inputs, {}, Workers);
+                auto Results = Taze::DecompileBatch(Inputs, Deterministic, Workers);
                 Check(Results.size() == Inputs.size(), "Batch lost results");
                 for (std::size_t I = 0; I < Inputs.size(); ++I)
                     if (I == 3 || I == 11)
@@ -246,6 +284,7 @@ return answer, text, count, x, y, recurse(5), string.upper("literal"), callbacks
             auto Mutated = Bytes;
             Mutated[Random % Mutated.size()] ^= char((Random >> 16) | 1);
             Taze::Options Limits;
+            Limits.IncludeHeader = false;
             Limits.MaxAnalysisCells = 100000;
             Limits.MaxOutputBytes = 1024 * 1024;
             Limits.MaxNesting = 16;

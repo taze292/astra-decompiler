@@ -8,7 +8,7 @@ local function Install(Environment)
     local debug = { info = function(Function) Environment.Probe = Function return 123 end }
     local WebSocket = Environment.Provider
     local game = Environment.Game
-    local print = function() end
+    local print = function() error("Bridge must not print") end
     local warn = function(Message) Environment.Warning = Message end
     local typeof = function(Value) return if type(Value) == "table" and Value.IsA then "Instance" else type(Value) end
     local task = { spawn = function(Function) Function() end, wait = function() Environment.Time += 0.1 end }
@@ -19,7 +19,17 @@ end
 local function Instance(Name, Class, Parent)
     local Value = { Name = Name, Class = Class, Parent = Parent, Children = {} }
     function Value:IsA(Expected) return self.Class == Expected end
-    function Value:FindFirstChild(Key) return self.Children[Key] end
+    function Value:GetChildren() local R={} for _, Child in self.Children do table.insert(R, Child) end return R end
+    function Value:GetDescendants()
+        local R={} for _, Child in self.Children do
+            table.insert(R, Child)
+            for _, Descendant in Child:GetDescendants() do table.insert(R, Descendant) end
+        end return R
+    end
+    function Value:FindFirstChild(Key, Recursive)
+        if self.Children[Key] then return self.Children[Key] end
+        if Recursive then for _, Child in self.Children do local Found=Child:FindFirstChild(Key, true) if Found then return Found end end end
+    end
     if Parent then Parent.Children[Name] = Value end
     return Value
 end
@@ -95,7 +105,7 @@ for _, Mode in { "Line", "StartLine", "Both", "Ignored", "Missing", "Hidden" } d
     assert(Bridge.FilterLineField == Expected, "Wrong detected line field for " .. Mode)
     assert(Bridge.LineProbe == (if Mode == "Ignored" or Mode == "Missing" or Mode == "Hidden" then "fallback" else "verified"))
     assert(Environment.decompile(Target) == "return 1")
-    assert(Bridge.Version == 5 and Bridge.Decompile == Environment.decompile)
+    assert(Bridge.Version == 6 and Bridge.Decompile == Environment.decompile)
     assert(Environment.decompile({}) == nil, "Invalid targets must exit silently")
     assert(Environment.decompile(Target, 0) == nil, "Invalid timeouts must exit silently")
     assert(Environment.decompile(Target, 0/0) == nil, "NaN timeout must be rejected")
@@ -109,8 +119,8 @@ for _, Mode in { "Line", "StartLine", "Both", "Ignored", "Missing", "Hidden" } d
         assert(Original(Target) == "original")
     end
     assert(Environment.decompile(Target) == "return 1")
-    local Field, HexPath, Options, Bytecode = Environment.Message:match("TAZE3\n([^\n]+)\n([^\n]*)\n([^\n]*)\n(.+)$")
-    assert(Options == "")
+    local Field, HexPath, Options, Bytecode = Environment.Message:match("TAZE4\n([^\n]+)\n([^\n]*)\n([^\n]*)\n(.+)$")
+    assert(Options:find('"casing":"pascal"', 1, true))
     assert(Field == Expected and Bytecode == "090300ff")
     local Path = HexPath:gsub("..", function(Pair) return string.char(tonumber(Pair, 16)) end)
     assert(Path == 'game:GetService("Players").LocalPlayer:FindFirstChild("PlayerScripts"):FindFirstChild("Quoted\\\"\\010\\255")', Path)
@@ -118,6 +128,25 @@ for _, Mode in { "Line", "StartLine", "Both", "Ignored", "Missing", "Hidden" } d
     local Clone = setmetatable({ Canonical = Target }, { __index = Target })
     assert(Environment.decompile(Clone) == "return 1")
     assert(Bridge.LastRequest.ModulePath == Path, "A cloned instance reference lost its module path")
+    local Deep = Instance("Deep", "Folder", Folder)
+    local Unique = Instance("Unique", "ModuleScript", Deep)
+    Unique.Bytecode = Target.Bytecode
+    assert(Environment.decompile(Unique) == "return 1")
+    assert(Bridge.LastRequest.ModulePath == 'game:GetService("Players").LocalPlayer:FindFirstChild("Unique", true)')
+    local Duplicate = Instance("Unique", "ModuleScript", Folder)
+    Duplicate.Bytecode = Target.Bytecode
+    assert(Environment.decompile(Unique) == "return 1")
+    assert(not Bridge.LastRequest.ModulePath:find(', true)', 1, true), "Duplicate descendant shortened ambiguously")
+    Folder.Deep = Deep
+    Deep.Unique = Unique
+    Players.LocalPlayer.PlayerScripts = Folder
+    assert(Environment.decompile(Unique) == "return 1")
+    assert(Bridge.LastRequest.ModulePath == 'game:GetService("Players").LocalPlayer.PlayerScripts.Deep.Unique')
+    local Children = Deep.GetChildren
+    Deep.GetChildren = function(self) local Result=Children(self) table.insert(Result, { Name="Unique" }) return Result end
+    assert(Environment.decompile(Unique) == "return 1")
+    assert(Bridge.LastRequest.ModulePath == "", "Duplicate siblings must suppress require locators")
+    Deep.GetChildren = Children
     local Detached = Instance("Detached", "ModuleScript")
     Detached.Bytecode = Target.Bytecode
     assert(Environment.decompile(Detached) == "return 1")
@@ -140,10 +169,15 @@ for _, Mode in { "Line", "StartLine", "Both", "Ignored", "Missing", "Hidden" } d
     assert(Bridge.LastError == nil and Bridge.LastRequest.Succeeded)
     assert(Bridge.LastRequest.ModulePath == "" and Bridge.LastRequest.PathStatus == "require lookups disabled")
     assert(Bridge.LastRequest.Options.casing == "snake" and Bridge.LastRequest.Options.naming == "generic")
-    local HexOptions = Environment.Message:match("TAZE3\n[^\n]*\n[^\n]*\n([^\n]*)\n")
-    local OptionBlock = HexOptions:gsub("..", function(Pair) return string.char(tonumber(Pair, 16)) end)
-    assert(OptionBlock == "casing=snake;gc-locators=false;naming=generic;require-locators=false", OptionBlock)
+    local HexOptions = Environment.Message:match("TAZE4\n[^\n]*\n[^\n]*\n([^\n]*)\n")
+    local OptionBlock = HexOptions
+    assert(OptionBlock:find('"casing":"snake"', 1, true) and OptionBlock:find('"require-locators":false', 1, true), OptionBlock)
     assert(Environment.TazeConfig.Options.naming == nil, "Per-call overrides mutated defaults")
+    Environment.TazeOptions = { casing = "camel", ["method-syntax"] = false }
+    Environment.TazeConfig = { Options = { naming = "debug" } }
+    assert(Environment.decompile(Target) == "return 1")
+    assert(Bridge.LastRequest.Options.casing == "camel" and Bridge.LastRequest.Options.naming == "debug")
+    assert(Bridge.LastRequest.Options["method-syntax"] == false, "Replacing the global options table was ignored")
     assert(Environment.decompile(Target, { casing = "snake;header=false" }) == nil)
     assert(Bridge.LastError:find("Invalid option value", 1, true))
     assert(Environment.decompile(Target, { ["module-path"] = "game" }) == nil)

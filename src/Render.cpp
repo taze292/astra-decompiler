@@ -22,7 +22,7 @@ std::string Function::Render(const std::vector<Statement> &Nodes, unsigned Inden
     };
     auto Separate = [&]()
     {
-        if (!Out.empty() && !Out.ends_with("\n\n"))
+        if (E.Settings.GroupSpacing && !Out.empty() && !Out.ends_with("\n\n"))
             Out += '\n';
     };
     enum class Group
@@ -219,7 +219,8 @@ std::string Function::Generate(bool Main)
         Nodes = StateMachine();
     }
     for (unsigned Pass = 0; Pass < E.Settings.OptimizationPasses; ++Pass)
-        Optimize(Nodes);
+        if (!Optimize(Nodes))
+            break;
     // Remove the compiler's implicit empty return at the end of a chunk/function.
     if (!Nodes.empty() && Nodes.back().Type == Kind::Return && Nodes.back().Text.empty())
         Nodes.pop_back();
@@ -300,7 +301,16 @@ std::string Function::Generate(bool Main)
                 Hoist.insert(U);
     unsigned Indent = Main ? 0 : 1;
     std::string Pad(Indent * E.Settings.IndentWidth, ' '), Out;
-    if (E.Settings.IncludeUpvalueComments && !Upvalues.empty())
+    if (E.Settings.IncludeUpvalueComments && !Upvalues.empty() && E.Settings.CompactUpvalues)
+    {
+        std::vector<std::string> Names;
+        for (const auto &U : Upvalues)
+            Names.push_back((Tokens(U.Value).empty() ? U.Name : Token(Tokens(U.Value).front())) + (U.Reference ? " (ref)" : " (copy)"));
+        Out += Pad + "-- Upvalues: " + Join(Names) + "\n";
+        if (E.Settings.GroupSpacing)
+            Out += '\n';
+    }
+    else if (E.Settings.IncludeUpvalueComments && !Upvalues.empty())
     {
         Out += Pad + "--[[\n" + Pad + std::string(E.Settings.IndentWidth, ' ') + "Upvalues:\n";
         for (unsigned J = 0; J < Upvalues.size(); ++J)

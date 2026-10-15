@@ -15,17 +15,19 @@ int main(int Argc, char **Argv)
         if (!File)
             throw Taze::Error("Cannot open input");
         std::string Bytes((std::istreambuf_iterator<char>(File)), {});
-        auto Expected = Taze::Decompile(Bytes);
+        Taze::Options Settings;
+        Settings.IncludeHeader = false;
+        auto Expected = Taze::Decompile(Bytes, Settings);
         std::vector<std::string_view> Inputs(64, Bytes);
         std::cout << "workers,inputs,samples,median_ms,inputs_per_second\n";
         for (unsigned Workers : {1u, 2u, 4u, 8u})
         {
-            Taze::DecompileBatch(Inputs, {}, Workers);
+            Taze::DecompileBatch(Inputs, Settings, Workers);
             std::vector<double> Times;
             for (unsigned I = 0; I < 7; ++I)
             {
                 auto Start = std::chrono::steady_clock::now();
-                auto Results = Taze::DecompileBatch(Inputs, {}, Workers);
+                auto Results = Taze::DecompileBatch(Inputs, Settings, Workers);
                 auto End = std::chrono::steady_clock::now();
                 for (const auto &Result : Results)
                     if (!Result.Succeeded() || Result.Output.Source != Expected.Source || Result.Output.Diagnostics != Expected.Diagnostics)

@@ -99,6 +99,9 @@ class Function
     std::vector<unsigned> LocalStarts;
     std::vector<unsigned> Parameters;
     std::vector<std::vector<unsigned>> ReadSymbols, WriteSymbols;
+    std::unordered_map<unsigned, unsigned> DefinitionCounts;
+    std::vector<bool> LoopCaptures;
+    bool HasCopyCaptures = false;
     std::set<unsigned> Cells;
     std::set<unsigned> ScalarReferences;
     std::vector<Statement> Prefix;
@@ -114,6 +117,7 @@ class Function
     std::vector<unsigned> RegionVisits;
     std::map<const std::vector<Statement> *, std::set<unsigned>> ScopedDeclarations;
     void BuildDataflow();
+    void CountDefinitions();
 
     unsigned SymbolAt(unsigned R, unsigned Pc, bool Write = false) const;
     std::string Read(unsigned R, unsigned Pc) const;
@@ -130,7 +134,7 @@ class Function
     std::vector<Statement> StateMachine();
     std::string Closure(const Instruction &I, std::vector<Statement> &Out);
     unsigned Index(unsigned Pc) const;
-    void Optimize(std::vector<Statement> &Nodes);
+    bool Optimize(std::vector<Statement> &Nodes);
     std::string Render(const std::vector<Statement> &Nodes, unsigned Indent, std::set<unsigned> &Declared, const std::set<unsigned> &Hoist);
 
   public:

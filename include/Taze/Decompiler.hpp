@@ -47,6 +47,12 @@ struct Options
     bool PreserveFunctionNames = true;
     bool NativeCaptures = true;
     bool MethodSyntax = true;
+    bool InferMemberNames = true;
+    bool InferCallNames = true;
+    bool CompactUpvalues = true;
+    bool GroupSpacing = true;
+    std::string LocalPrefix = "Value";
+    std::string ArgumentPrefix = "Argument";
     bool ForceStateMachine = false;
     bool AllowFallback = true;
     unsigned OptimizationPasses = 5;

@@ -17,7 +17,7 @@ local Ok, Failure = pcall(function()
         table.insert(Report.Cases, { Bytes = #Source, Seconds = os.clock() - Started })
         return Source
     end
-    local Default = Check({})
+    local Default = Check({ header = false })
     Report.DefaultBytes = #Default
     Report.GcLookups = Bridge.LastRequest.GcLookups
     Report.RequireLookups = Bridge.LastRequest.ExportLookups
@@ -36,7 +36,7 @@ local Ok, Failure = pcall(function()
     local Results, Completed = {}, 0
     for Index = 1, 4 do
         task.spawn(function()
-            Results[Index] = Bridge.Decompile(Module)
+            Results[Index] = Bridge.Decompile(Module, { header = false })
             Completed += 1
         end)
     end
@@ -47,11 +47,11 @@ local Ok, Failure = pcall(function()
     Report.Concurrent = Completed
     assert(Bridge.Decompile(Module, { casing = "invalid" }) == nil)
     assert(Bridge.LastError and Bridge.LastError:find("Casing", 1, true))
-    assert(Bridge.Decompile(Module) == Default, "Request failure leaked into subsequent settings")
+    assert(Bridge.Decompile(Module, { header = false }) == Default, "Request failure leaked into subsequent settings")
     local Times = {}
     for Index = 1, 11 do
         local Start = os.clock()
-        assert(Bridge.Decompile(Module) == Default)
+        assert(Bridge.Decompile(Module, { header = false }) == Default)
         Times[Index] = os.clock() - Start
     end
     table.sort(Times)
@@ -61,5 +61,5 @@ end)
 Report.Running = false
 Report.Passed = Ok
 Report.Error = if Ok then nil else tostring(Failure)
-print("TAZE_REWRITE_CAMERA", Ok, #Report.Cases, Report.Error or "")
+
 return Report

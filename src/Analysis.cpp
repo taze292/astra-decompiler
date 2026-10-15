@@ -12,6 +12,8 @@ Function::Function(Engine &Owner, unsigned Proto, std::vector<Upvalue> Captures,
         for (auto [Kind, R] : I.Captures)
             if (Kind == LCT_REF)
                 Cells.insert(R);
+            else if (Kind == LCT_VAL)
+                HasCopyCaptures = true;
     // A reference local can use native lexical capture when its identity never
     // needs to be split. Keep boxes for loop-created captures and register reuse
     // after CLOSEUPVALS; those require a separate lifetime per closure instance.
@@ -102,6 +104,28 @@ Function::Function(Engine &Owner, unsigned Proto, std::vector<Upvalue> Captures,
     while (Upvalues.size() < P.Upvalues)
         throw Error("Main prototype has unbound upvalues");
     BuildDataflow();
+    CountDefinitions();
+    // Backedge intervals conservatively mark closure sites that may execute
+    // repeatedly. Compute once instead of scanning all instructions per capture.
+    if (HasCopyCaptures)
+    {
+        std::vector<int> LoopDeltas(P.Instructions.size() + 1);
+        for (unsigned J = 0; J < P.Instructions.size(); ++J)
+        {
+            const auto &I = P.Instructions[J];
+            if (I.Target() >= 0 && I.Target() < int(I.Pc))
+            {
+                ++LoopDeltas[Index(unsigned(I.Target()))];
+                --LoopDeltas[J + 1];
+            }
+        }
+        int Active = 0;
+        for (unsigned J = 0; J < P.Instructions.size(); ++J)
+        {
+            Active += LoopDeltas[J];
+            LoopCaptures.push_back(Active > 0);
+        }
+    }
     if (E.AnalyzeExports())
     {
         std::vector<unsigned> Captures;
@@ -114,6 +138,18 @@ Function::Function(Engine &Owner, unsigned Proto, std::vector<Upvalue> Captures,
         if (Depth == 0)
             E.MainExportFrame = ExportFrame;
     }
+}
+
+void Function::CountDefinitions()
+{
+    if (!HasCopyCaptures)
+        return;
+    DefinitionCounts.clear();
+    for (auto S : Parameters)
+        ++DefinitionCounts[S];
+    for (const auto &I : P.Instructions)
+        for (auto R : Writes(I, P))
+            ++DefinitionCounts[SymbolAt(R, I.Pc, true)];
 }
 
 void Function::BuildDataflow()

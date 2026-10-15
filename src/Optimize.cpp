@@ -2,8 +2,9 @@
 
 namespace Taze::Detail
 {
-void Function::Optimize(std::vector<Statement> &Nodes)
+bool Function::Optimize(std::vector<Statement> &Nodes)
 {
+    bool Changed = false;
     std::function<bool(const Statement &, const Statement &)> Equal = [&](const auto &A, const auto &B)
     {
         return A.Type == B.Type && A.Left == B.Left && A.Text == B.Text && A.Body.size() == B.Body.size() &&
@@ -17,16 +18,30 @@ void Function::Optimize(std::vector<Statement> &Nodes)
         {
             Structure(S.Body);
             Structure(S.Else);
+            if (S.Type == Kind::While && S.Text == "true" && !S.Body.empty())
+            {
+                const auto &Guard = S.Body.front();
+                if (Guard.Type == Kind::If && Guard.Else.empty() && Guard.Body.size() == 1 && Guard.Body[0].Type == Kind::Break)
+                {
+                    S.Text = CleanCondition(Negate(Guard.Text));
+                    Changed = true;
+                    S.Body.erase(S.Body.begin());
+                }
+            }
             if (S.Type != Kind::If)
                 continue;
-            S.Text = CleanCondition(S.Text);
+            auto Clean = CleanCondition(S.Text);
+            Changed |= Clean != S.Text;
+            S.Text = std::move(Clean);
             if (S.Body.empty() && !S.Else.empty())
             {
                 S.Text = CleanCondition(Negate(S.Text));
+                Changed = true;
                 S.Body.swap(S.Else);
             }
             if (S.Body.size() == 1 && S.Body[0].Type == Kind::If && Same(S.Else, S.Body[0].Else))
             {
+                Changed = true;
                 auto Inner = std::move(S.Body[0]);
                 S.Text = "(" + S.Text + ") and (" + Inner.Text + ")";
                 S.Body = std::move(Inner.Body);
@@ -34,10 +49,12 @@ void Function::Optimize(std::vector<Statement> &Nodes)
             if (S.Body.size() == 1 && S.Body[0].Type == Kind::If && !S.Else.empty())
             {
                 S.Text = CleanCondition(Negate(S.Text));
+                Changed = true;
                 S.Body.swap(S.Else);
             }
             if (S.Else.size() == 1 && S.Else[0].Type == Kind::If && Same(S.Body, S.Else[0].Body))
             {
+                Changed = true;
                 auto Inner = std::move(S.Else[0]);
                 S.Text = "(" + S.Text + ") or (" + Inner.Text + ")";
                 S.Else = std::move(Inner.Else);
@@ -58,6 +75,7 @@ void Function::Optimize(std::vector<Statement> &Nodes)
             if (!Tail.empty())
             {
                 std::reverse(Tail.begin(), Tail.end());
+                Changed = true;
                 List.insert(List.begin() + std::ptrdiff_t(N + 1), Tail.begin(), Tail.end());
             }
         }
@@ -78,6 +96,7 @@ void Function::Optimize(std::vector<Statement> &Nodes)
                         "(" + Unwrap(Previous.Text) + ")" + (Test == Token(U) ? " and " : " or ") + "(" + Unwrap(S.Body[0].Text) + ")";
                     Previous.Pure = false;
                     Previous.Call = false;
+                    Changed = true;
                     List.erase(List.begin() + std::ptrdiff_t(N--));
                     continue;
                 }
@@ -90,6 +109,7 @@ void Function::Optimize(std::vector<Statement> &Nodes)
                 Value.Text = "(if " + CleanCondition(S.Text) + " then " + Unwrap(Value.Text) + " else " + Unwrap(S.Else[0].Text) + ")";
                 Value.Pure = false;
                 Value.Call = false;
+                Changed = true;
                 S = std::move(Value);
             }
         }
@@ -146,6 +166,7 @@ void Function::Optimize(std::vector<Statement> &Nodes)
                     {
                         for (std::size_t J = N + 1; J < End; ++J)
                             Replace(Nodes[J].Text, Token(S.Left[0]), Token(From.front()));
+                        Changed = true;
                         Nodes.erase(Nodes.begin() + std::ptrdiff_t(N));
                         continue;
                     }
@@ -165,6 +186,7 @@ void Function::Optimize(std::vector<Statement> &Nodes)
                 if (Once && Loop.Text.ends_with(Suffix))
                 {
                     Loop.Text.replace(Loop.Text.size() - Suffix.size(), Suffix.size(), " in " + S.Text);
+                    Changed = true;
                     Nodes.erase(Nodes.begin() + std::ptrdiff_t(N));
                     continue;
                 }
@@ -186,10 +208,11 @@ void Function::Optimize(std::vector<Statement> &Nodes)
                             auto First = Args.front();
                             const auto &Parameter = E.Symbols[First];
                             bool Self = Parameter.Parameter && (Parameter.Original == "self" || Parameter.Original == "Self");
-                            for (auto U : Tokens(S.Text))
-                                if (U != First && E.Symbols[U].Owner != Parameter.Owner &&
-                                    (E.Symbols[U].Original == "self" || E.Symbols[U].Original == "Self"))
-                                    Self = false; // Do not shadow a captured outer receiver.
+                            if (Self)
+                                for (auto U : Tokens(S.Text))
+                                    if (U != First && E.Symbols[U].Owner != Parameter.Owner &&
+                                        (E.Symbols[U].Original == "self" || E.Symbols[U].Original == "Self"))
+                                        Self = false; // Do not shadow a captured outer receiver.
                             if (Self)
                             {
                                 E.Symbols[First].ImplicitSelf = true;
@@ -203,6 +226,7 @@ void Function::Optimize(std::vector<Statement> &Nodes)
                         S.Text = "function " + Target + S.Text.substr(8);
                         S.Type = Kind::Function;
                         S.Left.clear();
+                        Changed = true;
                         Nodes.erase(Nodes.begin() + std::ptrdiff_t(N + 1));
                     }
                 }
@@ -212,6 +236,7 @@ void Function::Optimize(std::vector<Statement> &Nodes)
                 auto Id = S.Left[0];
                 if (!Reads[Id] && S.Pure)
                 {
+                    Changed = true;
                     Nodes.erase(Nodes.begin() + std::ptrdiff_t(N));
                     continue;
                 }
@@ -239,6 +264,7 @@ void Function::Optimize(std::vector<Statement> &Nodes)
                                     !PrefixExpression(Replacement) && (Replacement.empty() || Replacement.front() != '('))
                                     Replacement = "(" + Replacement + ")";
                                 Replace(Nodes[J].Text, Token(Id), Replacement);
+                                Changed = true;
                                 Nodes.erase(Nodes.begin() + std::ptrdiff_t(N));
                                 Removed = true;
                                 break;
@@ -252,7 +278,8 @@ void Function::Optimize(std::vector<Statement> &Nodes)
                         }
                     }
                 }
-                if (N + 1 < Nodes.size() && Reads[Id] == 1 && S.Text.find('\n') == std::string::npos)
+                if (N + 1 < Nodes.size() && Reads[Id] == 1 && S.Text.find('\n') == std::string::npos &&
+                    Nodes[N + 1].Text.find(Token(Id)) != std::string::npos)
                 {
                     auto &Next = Nodes[N + 1];
                     auto Uses = Tokens(Next.Text);
@@ -263,7 +290,35 @@ void Function::Optimize(std::vector<Statement> &Nodes)
                         if (E.Symbols[Dependency].Cell || E.Symbols[Dependency].ReferenceAlias)
                             CanReorder = false;
                     bool Ordered = CanReorder || BeforeUse.find_first_of(")[.:+-*/%^#") == std::string::npos;
+                    // Reading a native captured local has no effects. It can move
+                    // past evaluation of bare locals/literals before the first
+                    // arithmetic operator is applied, but never across a property,
+                    // call, or completed parenthesized expression (metamethods).
+                    if (!Ordered)
+                    {
+                        auto ValueTokens = Tokens(S.Text);
+                        if (ValueTokens.size() == 1 && S.Text == Token(ValueTokens.front()) && !E.Symbols[ValueTokens.front()].Cell &&
+                            BeforeUse.find_first_of(")[.:") == std::string::npos)
+                            Ordered = true;
+                    }
                     auto PrefixSymbols = Tokens(BeforeUse);
+                    // Moving an effectful expression past reads of immutable
+                    // locals and numeric literals preserves evaluation order.
+                    // Reject completed operations/property access/calls in the
+                    // prefix; they may invoke metamethods or mutate captures.
+                    if (!Ordered)
+                    {
+                        auto PrefixText = BeforeUse;
+                        bool StablePrefix = true;
+                        for (auto U : PrefixSymbols)
+                        {
+                            const auto &Symbol = E.Symbols[U];
+                            StablePrefix &= !Symbol.Cell && !Symbol.ReferenceAlias && WritesCount[U] <= 1;
+                            Replace(PrefixText, Token(U), "0");
+                        }
+                        if (StablePrefix && PrefixText.find_first_not_of(" (=,+-*/%^0123456789") == std::string::npos)
+                            Ordered = true;
+                    }
                     if (PrefixSymbols.size() == 1 && !E.Symbols[PrefixSymbols[0]].Cell && BeforeUse.starts_with(Token(PrefixSymbols[0])))
                     {
                         auto Tail = BeforeUse.substr(Token(PrefixSymbols[0]).size());
@@ -288,6 +343,7 @@ void Function::Optimize(std::vector<Statement> &Nodes)
                         Replace(Next.Text, Token(Id), Replacement);
                         Next.Pure = Next.Pure && S.Pure;
                         Next.Call = Next.Call || S.Call;
+                        Changed = true;
                         Nodes.erase(Nodes.begin() + std::ptrdiff_t(N));
                         if (N)
                             --N;
@@ -342,6 +398,7 @@ void Function::Optimize(std::vector<Statement> &Nodes)
                 else if (!(Key.starts_with('[') && Key.ends_with(']')))
                     break;
                 Fields.push_back(Key + " = " + Right);
+                Changed = true;
                 List.erase(List.begin() + std::ptrdiff_t(J));
             }
             if (Fields.size() > 3)
@@ -356,6 +413,7 @@ void Function::Optimize(std::vector<Statement> &Nodes)
         }
     };
     Tables(Nodes);
+    return Changed;
 }
 
 } // namespace Taze::Detail

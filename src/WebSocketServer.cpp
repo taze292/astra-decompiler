@@ -173,6 +173,69 @@ void Frame(SOCKET Client, unsigned Opcode, std::string_view Payload)
     Send(Client, Payload);
 }
 
+// Restricted JSON options object: keys and string enum values use ASCII words,
+// booleans and unsigned integers keep their types. No executable Luau is parsed.
+void JsonOptions(Options &Settings, std::string_view Text)
+{
+    if (Text.size() > 4096)
+        throw Error("Option block exceeds 4096 bytes");
+    std::size_t Pos = 0;
+    auto Space = [&]()
+    {
+        while (Pos < Text.size() && (Text[Pos] == ' ' || Text[Pos] == '\t'))
+            ++Pos;
+    };
+    auto Expect = [&](char C)
+    {
+        Space();
+        if (Pos >= Text.size() || Text[Pos++] != C)
+            throw Error("Invalid JSON option object");
+    };
+    auto Word = [&]()
+    {
+        auto Begin = Pos;
+        while (Pos < Text.size() && ((Text[Pos] >= 'a' && Text[Pos] <= 'z') || (Text[Pos] >= 'A' && Text[Pos] <= 'Z') ||
+                                     (Text[Pos] >= '0' && Text[Pos] <= '9') || Text[Pos] == '-' || Text[Pos] == '_'))
+            ++Pos;
+        if (Pos == Begin)
+            throw Error("Invalid JSON option value");
+        return Text.substr(Begin, Pos - Begin);
+    };
+    std::set<std::string> Seen;
+    Expect('{');
+    Space();
+    if (Pos < Text.size() && Text[Pos] != '}')
+        while (true)
+        {
+            Expect('"');
+            auto Key = Word();
+            Expect('"');
+            Expect(':');
+            Space();
+            bool Quoted = Pos < Text.size() && Text[Pos] == '"';
+            if (Quoted)
+                ++Pos;
+            auto Value = Word();
+            if (Quoted)
+                Expect('"');
+            else if (Value != "true" && Value != "false" &&
+                     (Value.empty() || !std::all_of(Value.begin(), Value.end(), [](char C) { return C >= '0' && C <= '9'; }) ||
+                      (Value.size() > 1 && Value.front() == '0')))
+                throw Error("Invalid JSON scalar");
+            if (Key == "module-path" || Key == "filter-line" || !Seen.insert(std::string(Key)).second)
+                throw Error("Duplicate or reserved bridge option");
+            ApplyOption(Settings, Key, Value);
+            Space();
+            if (Pos >= Text.size() || Text[Pos] != ',')
+                break;
+            ++Pos;
+        }
+    Expect('}');
+    Space();
+    if (Pos != Text.size())
+        throw Error("Trailing JSON option data");
+}
+
 std::string Process(std::string_view Request, const Options &Settings)
 {
     auto Newline = Request.find('\n');
@@ -203,7 +266,8 @@ std::string Process(std::string_view Request, const Options &Settings)
                 Bytes[I] = char((Digit(Hex[I * 2]) << 4) | Digit(Hex[I * 2 + 1]));
             return Bytes;
         };
-        bool HasOptions = Request.starts_with("TAZE3\n");
+        bool Json = Request.starts_with("TAZE4\n");
+        bool HasOptions = Json || Request.starts_with("TAZE3\n");
         if (HasOptions || Request.starts_with("TAZE2\n"))
         {
             Request.remove_prefix(6);
@@ -220,9 +284,11 @@ std::string Process(std::string_view Request, const Options &Settings)
             RequestSettings.ModulePath = Decode(Line(), 8192);
             if (HasOptions)
             {
-                auto Block = Decode(Line(), 4096);
+                auto Block = Json ? std::string(Line()) : Decode(Line(), 4096);
+                if (Json)
+                    JsonOptions(RequestSettings, Block);
                 std::set<std::string> Seen;
-                std::string_view Remaining = Block;
+                std::string_view Remaining = Json ? std::string_view{} : Block;
                 while (!Remaining.empty())
                 {
                     auto End = Remaining.find(';');

@@ -52,6 +52,14 @@ int main(int Argc, char **Argv)
                              "  --no-require-locators        Omit require lookups only\n"
                              "  --no-type-names              Use ValueN for anonymous locals\n"
                              "  --no-preserve-function-names Apply casing to function bindings too\n"
+                             "  --no-method-syntax           Keep explicit self parameters\n"
+                             "  --no-native-captures         Use reference boxes for all mutable captures\n"
+                             "  --no-infer-members           Disable property-name hints\n"
+                             "  --no-infer-calls             Disable constructor/service/result hints\n"
+                             "  --local-prefix NAME          Anonymous local prefix (default Value)\n"
+                             "  --argument-prefix NAME       Parameter prefix (default Argument)\n"
+                             "  --no-compact-upvalues        Use expanded capture comments\n"
+                             "  --no-group-spacing           Omit statement-group blank lines\n"
                              "  --optimization-passes N      Simplification passes (0..8; default 5)\n"
                              "  --no-fallback                Fail if structured output is unavailable\n"
                              "  --max-input-bytes N          Input cap (1..268435456)\n"
@@ -107,11 +115,14 @@ int main(int Argc, char **Argv)
             }
             else if (Arg.starts_with("--no-"))
             {
-                static const std::set<std::string> Flags = {"header",      "lines",
-                                                            "upvalues",    "locators",
-                                                            "gc-locators", "require-locators",
-                                                            "type-names",  "preserve-function-names",
-                                                            "fallback",    "state-machine"};
+                static const std::set<std::string> Flags = {"header",           "lines",
+                                                            "upvalues",         "locators",
+                                                            "gc-locators",      "require-locators",
+                                                            "type-names",       "preserve-function-names",
+                                                            "fallback",         "state-machine",
+                                                            "method-syntax",    "native-captures",
+                                                            "infer-members",    "infer-calls",
+                                                            "compact-upvalues", "group-spacing"};
                 auto Key = Arg.substr(5);
                 if (!Flags.count(Key))
                     throw Taze::Error("Unknown flag " + Arg);

@@ -82,6 +82,18 @@ void ApplyOption(Options &S, std::string_view Key, std::string_view Value)
         S.NativeCaptures = Boolean(Value);
     else if (Key == "method-syntax")
         S.MethodSyntax = Boolean(Value);
+    else if (Key == "infer-members")
+        S.InferMemberNames = Boolean(Value);
+    else if (Key == "infer-calls")
+        S.InferCallNames = Boolean(Value);
+    else if (Key == "compact-upvalues")
+        S.CompactUpvalues = Boolean(Value);
+    else if (Key == "group-spacing")
+        S.GroupSpacing = Boolean(Value);
+    else if (Key == "local-prefix")
+        S.LocalPrefix = Value;
+    else if (Key == "argument-prefix")
+        S.ArgumentPrefix = Value;
     else if (Key == "fallback")
         S.AllowFallback = Boolean(Value);
     else if (Key == "state-machine")
@@ -110,6 +122,13 @@ void ApplyOption(Options &S, std::string_view Key, std::string_view Value)
 
 void ValidateOptions(const Options &S)
 {
+    for (const auto &Prefix : {S.LocalPrefix, S.ArgumentPrefix})
+    {
+        auto Letter = [](char C) { return (C >= 'a' && C <= 'z') || (C >= 'A' && C <= 'Z') || C == '_'; };
+        if (Prefix.empty() || Prefix.size() > 32 || !Letter(Prefix.front()) ||
+            !std::all_of(Prefix.begin(), Prefix.end(), [&](char C) { return Letter(C) || (C >= '0' && C <= '9'); }))
+            throw Error("Naming prefixes must be ASCII identifiers of 1..32 characters");
+    }
     if (S.Encoding != OpcodeEncoding::Auto && S.Encoding != OpcodeEncoding::Plain && S.Encoding != OpcodeEncoding::Roblox)
         throw Error("Invalid opcode encoding");
     if (S.Casing != VariableCase::Pascal && S.Casing != VariableCase::Camel && S.Casing != VariableCase::Snake &&

@@ -9,7 +9,7 @@ $Probe = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
 $Probe.Start()
 $Port = $Probe.LocalEndpoint.Port
 $Probe.Stop()
-$Server = Start-Process -FilePath $Executable -ArgumentList @('--serve', '--port', "$Port") -WindowStyle Hidden -PassThru `
+$Server = Start-Process -FilePath $Executable -ArgumentList @('--serve', '--header', 'false', '--port', "$Port") -WindowStyle Hidden -PassThru `
     -RedirectStandardOutput "$WorkDirectory/server.log" -RedirectStandardError "$WorkDirectory/server.error.log"
 $Connections = [Collections.Generic.List[IDisposable]]::new()
 $Checks = 0
@@ -54,7 +54,7 @@ function Fixture([string]$Name, [string]$Source) {
     [IO.File]::WriteAllText("$Path.luau", $Source)
     & $Compiler "$Path.luau" "$Path.luac"
     if ($LASTEXITCODE) { throw 'Fixture compilation failed' }
-    & $Executable "$Path.luac" -o "$Path.expected.luau"
+    & $Executable --header false "$Path.luac" -o "$Path.expected.luau"
     if ($LASTEXITCODE) { throw 'CLI decompilation failed' }
     return @{
         Hex = [BitConverter]::ToString([IO.File]::ReadAllBytes("$Path.luac")).Replace('-', '')
@@ -94,6 +94,14 @@ try {
     $Large = Fixture 'large' ('return "' + ('a' * 70000) + '"')
     $Module = Fixture 'module' 'local M={}; function M.Read() return 17 end; return M'
     $Socket = Connect-Bridge
+    $JsonOptions = '{"casing":"snake","header":true,"require-locators":false,"gc-locators":true}'
+    Send-Text $Socket ("90`nTAZE4`nLine`n`n$JsonOptions`n" + $Module.Hex)
+    $JsonReply = Receive-Text $Socket
+    Check ($JsonReply.Contains("-- Decompiled with Taze's Decompiler | Bytecode Version:") -and $JsonReply.Contains('-- Time taken: ') -and $JsonReply.Contains(' | filtergc(') -and -not $JsonReply.Contains(' | require(')) 'JSON table options/header failed'
+    foreach ($Bad in @('{"header":true,"header":false}', '{"indent":2junk}', '{"indent":02}', '{"unknown":true}', '{"header":false,}', '{"header":false}junk', '{"header":[]}', '{"module-path":"game"}', '{"max-analysis-work":64000000}')) {
+        Send-Text $Socket ("91`nTAZE4`nLine`n`n$Bad`n" + $Small.Hex)
+        Check ((Receive-Text $Socket).StartsWith("91`nerror`n")) "Invalid JSON options accepted: $Bad"
+    }
     function Option-Hex([string]$Text) { [BitConverter]::ToString([Text.Encoding]::ASCII.GetBytes($Text)).Replace('-', '') }
     $OptionHex = Option-Hex 'casing=snake;header=false;gc-locators=false;require-locators=false'
     Send-Text $Socket ("100`nTAZE3`nLine`n`n$OptionHex`n" + $Module.Hex)

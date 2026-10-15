@@ -1,5 +1,7 @@
 #include "Reconstruction.hpp"
 #include <chrono>
+#include <iomanip>
+#include <locale>
 
 namespace Taze
 {
@@ -14,14 +16,17 @@ Result Decompile(std::string_view Bytecode, const Options &Settings)
     Engine E(C, Settings);
     Function Main(E, C.Main, {}, 0);
     auto Source = Main.Generate(true);
-    if (Settings.IncludeHeader)
-    {
-        Source = "-- Decompiled by Taze\n-- Luau bytecode v" + std::to_string(C.Version) + " | Types v" + std::to_string(C.Types) + "\n\n" +
-                 Source;
-    }
     auto Reconstructed = std::chrono::steady_clock::now();
     E.Output.Source = E.Resolve(std::move(Source));
     auto Finished = std::chrono::steady_clock::now();
+    if (Settings.IncludeHeader)
+    {
+        std::ostringstream Header;
+        Header.imbue(std::locale::classic());
+        Header << "-- Decompiled with Taze's Decompiler | Bytecode Version: " << C.Version << "\n-- Time taken: " << std::fixed
+               << std::setprecision(6) << std::chrono::duration<double>(Finished - Start).count() << "s\n\n";
+        E.Output.Source.insert(0, Header.str());
+    }
     if (E.Output.Source.size() > Settings.MaxOutputBytes)
         throw Error("Generated source exceeds output limit");
     E.Output.BytecodeVersion = C.Version;

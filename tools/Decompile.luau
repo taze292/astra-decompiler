@@ -2,6 +2,16 @@
 -- Optional: getgenv().TazeConfig = { Url = "ws://127.0.0.1:8877/decompile", Timeout = 30 }
 local Environment = getgenv and getgenv() or getfenv(0)
 local Config = if type(Environment.TazeConfig) == "table" then Environment.TazeConfig else {}
+-- Replace or edit this table at any time. Every request takes its own snapshot.
+Environment.TazeOptions = Environment.TazeOptions or {
+    casing = "pascal", naming = "inferred", ["type-names"] = true,
+    ["preserve-function-names"] = true, ["method-syntax"] = true, ["native-captures"] = true,
+    ["infer-members"] = true, ["infer-calls"] = true, ["compact-upvalues"] = true, ["group-spacing"] = true,
+    ["local-prefix"] = "Value", ["argument-prefix"] = "Argument",
+    indent = 4, header = true, lines = true, upvalues = true,
+    locators = true, ["require-locators"] = true, ["gc-locators"] = true,
+    ["optimization-passes"] = 5, ["state-machine"] = false, fallback = true,
+}
 local Url = Config.Url or "ws://127.0.0.1:8877/decompile"
 local DefaultTimeout = Config.Timeout or 30
 local MaxPending = Config.MaxPending or 32
@@ -23,7 +33,7 @@ local Previous = Environment.TazeBridge
 local PreviousDecompile = Environment.decompile or decompile
 local IsPreviousBridge = type(Previous) == "table" and Previous.Marker == "TazeBridge1"
 local Original = if IsPreviousBridge then Previous.Original else Environment.decompile or decompile
-local Bridge = { Marker = "TazeBridge1", Version = 5, Original = Original, Url = Url, Connected = false }
+local Bridge = { Marker = "TazeBridge1", Version = 6, Original = Original, Url = Url, Connected = false }
 local HookTargets = { Original, PreviousDecompile }
 if IsPreviousBridge and type(Previous.HookTargets) == "table" then
     for _, Target in Previous.HookTargets do
@@ -96,7 +106,7 @@ end
 local function GcEnabled(Options)
     return Options.lines ~= false and Options.locators ~= false and Options["gc-locators"] ~= false
 end
-if type(Config.Options) ~= "table" or GcEnabled(Config.Options) then
+if GcEnabled(Config.Options or Environment.TazeOptions) then
     Bridge.FilterLineField, Bridge.LineProbe = DetectLineField()
 else
     Bridge.FilterLineField, Bridge.LineProbe = "Line", "disabled"
@@ -119,7 +129,7 @@ local function ModulePath(Target)
         return "", "not a ModuleScript"
     end
 
-    local Parts = {}
+    local Parts, Instances = {}, {}
     local Current = Target
     local LocalPlayer = game:GetService("Players").LocalPlayer
     local Base = "game"
@@ -138,10 +148,39 @@ local function ModulePath(Target)
         if not SameInstance(Parent:FindFirstChild(Current.Name), Current) then
             return "", "ambiguous child name or uncomparable instance reference: " .. Current.Name
         end
-        table.insert(Parts, ':FindFirstChild(' .. QuoteName(Current.Name) .. ')')
+        local MatchingChildren = 0
+        for _, Child in Parent:GetChildren() do
+            if Child.Name == Current.Name then MatchingChildren += 1 end
+        end
+        if MatchingChildren ~= 1 then return "", "ambiguous child name: " .. Current.Name end
+        -- Dot access is only safe when a property/method does not shadow the child.
+        local Ok, Member = pcall(function() return Parent[Current.Name] end)
+        local Keywords = { ["and"]=true, ["break"]=true, ["do"]=true, ["else"]=true, ["elseif"]=true,
+            ["end"]=true, ["false"]=true, ["for"]=true, ["function"]=true, ["if"]=true, ["in"]=true,
+            ["local"]=true, ["nil"]=true, ["not"]=true, ["or"]=true, ["repeat"]=true, ["return"]=true,
+            ["then"]=true, ["true"]=true, ["until"]=true, ["while"]=true }
+        local Dot = Current.Name:match("^[%a_][%w_]*$") and not Keywords[Current.Name] and Ok and SameInstance(Member, Current)
+        table.insert(Parts, if Dot then "." .. Current.Name else ':FindFirstChild(' .. QuoteName(Current.Name) .. ')')
+        table.insert(Instances, Parent)
         Current = Parent
     end
     for Index = #Parts, 1, -1 do
+        -- Only shorten a path if at least two child segments are saved. Count
+        -- matches in the actual ancestor, never assume recursive lookup is unique.
+        if Index > 2 and (Index < #Parts or Base ~= "game") then
+            local Ancestor = Instances[Index]
+            local Count = 0
+            for _, Descendant in Ancestor:GetDescendants() do
+                if Descendant.Name == Target.Name then
+                    Count += 1
+                    if Count > 1 then break end
+                end
+            end
+            if Count == 1 and SameInstance(Ancestor:FindFirstChild(Target.Name, true), Target) then
+                Base ..= ':FindFirstChild(' .. QuoteName(Target.Name) .. ', true)'
+                break
+            end
+        end
         Base ..= Parts[Index]
     end
     if #Base > 8192 then
@@ -255,6 +294,7 @@ for Byte = 0, 255 do
 end
 
 local function RequestOptions(Overrides)
+    local Config = if type(Environment.TazeConfig) == "table" then Environment.TazeConfig else {}
     if Config.Options ~= nil and type(Config.Options) ~= "table" then
         error("TazeConfig.Options must be a table")
     end
@@ -262,6 +302,8 @@ local function RequestOptions(Overrides)
         error("Per-call options must be a table")
     end
     local Options = {}
+    if type(Environment.TazeOptions) ~= "table" then error("TazeOptions must be a table") end
+    for Key, Value in Environment.TazeOptions do Options[Key] = Value end
     for Key, Value in Config.Options or {} do Options[Key] = Value end
     for Key, Value in Overrides or {} do Options[Key] = Value end
     local Keys = {}
@@ -273,15 +315,20 @@ local function RequestOptions(Overrides)
             error("Invalid option value for " .. Key)
         end
         local Text = tostring(Value)
-        if Text == "" or Text:find("[;=\r\n]") then error("Invalid option value for " .. Key) end
+        if Text == "" or not Text:match("^[%w_%-]+$") then error("Invalid option value for " .. Key) end
         table.insert(Keys, Key)
     end
     table.sort(Keys)
     local Entries = {}
-    for _, Key in Keys do table.insert(Entries, Key .. "=" .. tostring(Options[Key])) end
-    local Block = table.concat(Entries, ";")
+    for _, Key in Keys do
+        local Value = Options[Key]
+        local Text = if type(Value) == "string" then '"' .. Value .. '"' else tostring(Value)
+        table.insert(Entries, '"' .. Key .. '":' .. Text)
+    end
+    -- A Luau options table serialized as a flat JSON object (TAZE4).
+    local Block = "{" .. table.concat(Entries, ",") .. "}"
     if #Block > 4096 then error("Option block exceeds 4096 bytes") end
-    return Options, Block:gsub(".", Hex)
+    return Options, Block
 end
 
 local function Decompile(Target, Timeout, Overrides)
@@ -323,7 +370,7 @@ local function Decompile(Target, Timeout, Overrides)
     local Request = {}
     Pending[Id] = Request
     local Sent, SendError = pcall(function()
-        Current:Send(Id .. "\nTAZE3\n" .. Bridge.FilterLineField .. "\n" .. Path .. "\n" .. EncodedOptions .. "\n" .. Encoded)
+        Current:Send(Id .. "\nTAZE4\n" .. Bridge.FilterLineField .. "\n" .. Path .. "\n" .. EncodedOptions .. "\n" .. Encoded)
     end)
     if not Sent then
         Pending[Id] = nil
@@ -355,6 +402,7 @@ end
 local ActiveRequests = 0
 Installed = function(...)
     local Started = os.clock()
+    local CurrentConfig = if type(Environment.TazeConfig) == "table" then Environment.TazeConfig else {}
     local Ok, Result, Failure
     if ActiveRequests >= MaxPending then
         Ok, Failure = true, "Taze pending request limit reached"
@@ -371,7 +419,7 @@ Installed = function(...)
     end
     Bridge.LastError = tostring(if Ok then Failure or "Taze decompilation failed" else Result)
     Bridge.LastRequest = { Succeeded = false, Error = Bridge.LastError, ElapsedSeconds = os.clock() - Started }
-    if Config.ErrorMode == "raise" then error(Bridge.LastError, 2) end
+    if CurrentConfig.ErrorMode == "raise" then error(Bridge.LastError, 2) end
     return nil
 end
 
@@ -427,5 +475,4 @@ end
 Environment.decompile = Installed
 Bridge.Decompile = Installed
 Environment.TazeBridge = Bridge
-pcall(print, "Taze decompile v5 installed: " .. Url .. " | per-call options | " .. Bridge.FilterLineField .. " (" .. Bridge.LineProbe .. ") | cached references: " .. Bridge.HookStatus)
 return Bridge

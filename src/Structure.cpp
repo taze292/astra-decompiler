@@ -195,6 +195,7 @@ std::vector<Statement> Function::StateMachine()
         E.Symbols[Registers[R]].Cell = true;
     }
     ScalarReferences.clear();
+    CountDefinitions();
     PendingMethod.clear();
     unsigned PcSymbol = E.New("ProgramCounter", Id, true);
     std::vector<Statement> Out{{Kind::Raw, {}, "-- Control flow required an explicit state machine."}, {Kind::Assign, {PcSymbol}, "0"}};

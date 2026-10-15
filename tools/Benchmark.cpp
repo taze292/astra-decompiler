@@ -28,6 +28,7 @@ int main(int Argc, char **Argv)
             Samples = unsigned(Value);
         }
         Taze::Options Settings;
+        Settings.IncludeHeader = false; // Timing is intentionally variable; compare only generated code.
         if (Argc > 3)
             Settings.ModulePath = Argv[3];
         auto Expected = Taze::Decompile(Bytes, Settings);

@@ -232,7 +232,7 @@ int main()
                                         Lookup);
         Check(Execute(LookupTest) == Execute(Luau::compile("return 'Probe',2,nil")),
               "Named locator should use the original name and line without constants");
-        Check(Source.find("Upvalues:\n        1: Shared (type \"Copy\")") != std::string::npos, "Missing Upvalues label");
+        Check(Source.find("-- Upvalues: Shared (copy)") != std::string::npos, "Missing compact Upvalues label");
         Check(Source.find("local First = Input.Name\n    local Second = Input.Value\n\n    Input.Value = First") != std::string::npos,
               "Consecutive locals were not grouped and separated from writes");
         Check(Source.find("\n\n    return ") != std::string::npos, "Missing return separation");
@@ -444,7 +444,10 @@ int main()
                         throw std::runtime_error("Versioned execution mismatch");
                     Passed++;
                 }
-                if (Taze::Decompile(Encoded + std::string(24, '\0')).Source != Taze::Decompile(Encoded).Source)
+                Taze::Options Deterministic;
+                Deterministic.IncludeHeader = false;
+                if (Taze::Decompile(Encoded + std::string(24, '\0'), Deterministic).Source !=
+                    Taze::Decompile(Encoded, Deterministic).Source)
                     throw std::runtime_error("Roblox trailer affected source");
                 Passed++;
             }
