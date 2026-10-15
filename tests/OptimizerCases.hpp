@@ -108,6 +108,28 @@ for i = 1, 4 do
 end
 return result, value
 )"},
+    {"optimizer_scalar_capture_assignment", R"(
+local value = 1
+local function increment(delta)
+    value += delta
+    return value
+end
+local function replace()
+    value = 40
+    return 2
+end
+local function snapshotAdd()
+    local before = value
+    local delta = replace()
+    value = before + delta
+    return value
+end
+local first = increment(3)
+local second = snapshotAdd()
+local result = replace()
+value = result
+return first, second, value
+)"},
     {"optimizer_alias_use_counts", R"(
 local log = ""
 local function effect() log ..= "E" return 2 end

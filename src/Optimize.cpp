@@ -301,8 +301,13 @@ bool Function::Optimize(std::vector<Statement> &Nodes)
                     // metamethods, and and/or/if can skip the RHS entirely.
                     // Inspect syntax rather than a character blacklist: a bare
                     // global read or `local and value` has no punctuation.
-                    bool Ordered = CanReorder;
-                    if (!CanReorder)
+                    // A plain assignment target is a binding, not a value read.
+                    // Even a mutable capture is assigned only after the RHS has
+                    // finished; field/index targets still need the checks below.
+                    bool ScalarAssignment = Next.Type == Kind::Raw && PrefixSymbols.size() == 1 && !E.Symbols[PrefixSymbols[0]].Cell &&
+                                            BeforeUse == Token(PrefixSymbols[0]) + " = ";
+                    bool Ordered = CanReorder || ScalarAssignment;
+                    if (!Ordered)
                     {
                         Ordered = true;
                         for (auto U : PrefixSymbols)
