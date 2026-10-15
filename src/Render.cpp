@@ -315,7 +315,9 @@ std::string Function::Generate(bool Main)
                 Hoist.insert(U);
     unsigned Indent = Main ? 0 : 1;
     std::string Pad(Indent * E.Settings.IndentWidth, ' '), Out;
-    if (E.Settings.IncludeUpvalueComments && !Upvalues.empty() && E.Settings.CompactUpvalues)
+    if (Main && RecoveredInline)
+        Out += Pad + "-- Uninlined by Taze's Decompiler\n";
+    if (!RecoveredInline && E.Settings.IncludeUpvalueComments && !Upvalues.empty() && E.Settings.CompactUpvalues)
     {
         std::vector<std::string> Names;
         for (unsigned J = 0; J < Upvalues.size(); ++J)
@@ -328,7 +330,7 @@ std::string Function::Generate(bool Main)
         if (E.Settings.GroupSpacing)
             Out += '\n';
     }
-    else if (E.Settings.IncludeUpvalueComments && !Upvalues.empty())
+    else if (!RecoveredInline && E.Settings.IncludeUpvalueComments && !Upvalues.empty())
     {
         Out += Pad + "--[[\n" + Pad + std::string(E.Settings.IndentWidth, ' ') + "Upvalues:\n";
         for (unsigned J = 0; J < Upvalues.size(); ++J)

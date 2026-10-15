@@ -267,13 +267,40 @@ ControlFlow::ControlFlow(const Prototype &P, std::size_t MaxCells, AnalysisBudge
 
     LiveIn.resize(Count + 1);
     std::vector<std::bitset<256>> Uses(Count), Definitions(Count);
-    std::bitset<256> ReferenceRegisters;
-    for (const auto &I : P.Instructions)
-        for (auto [Kind, Register] : I.Captures)
-            if (Kind == LCT_REF)
-                ReferenceRegisters.set(Register);
+    // First use Uses as a forward may-be-open capture set. A physical register
+    // captured in an earlier scope is not still an upvalue after that scope's
+    // CLOSEUPVALS. A function-wide capture mask makes later reuse of that
+    // register (especially loop outputs) appear observable at the final close.
     std::queue<unsigned> Queue;
     std::vector<bool> Queued(Count, true);
+    for (unsigned J = 0; J < Count; ++J)
+        Queue.push(J);
+    while (!Queue.empty())
+    {
+        unsigned J = Queue.front();
+        Queue.pop();
+        Queued[J] = false;
+        const auto &I = P.Instructions[J];
+        auto Open = Uses[J];
+        if (I.Op == LOP_CLOSEUPVALS)
+            for (unsigned R = I.A; R < P.Stack; ++R)
+                Open.reset(R);
+        for (auto [Kind, R] : I.Captures)
+            if (Kind == LCT_REF)
+                Open.set(R);
+        Budget.Spend(1 + Successors[J].size() + I.Captures.size());
+        for (unsigned Next : Successors[J])
+            if (Next < Count && (Uses[Next] | Open) != Uses[Next])
+            {
+                Uses[Next] |= Open;
+                if (!Queued[Next])
+                {
+                    Queued[Next] = true;
+                    Queue.push(Next);
+                }
+            }
+    }
+    std::fill(Queued.begin(), Queued.end(), true);
     for (unsigned J = 0; J < Count; ++J)
     {
         const auto &I = P.Instructions[J];
@@ -282,13 +309,15 @@ ControlFlow::ControlFlow(const Prototype &P, std::size_t MaxCells, AnalysisBudge
         // escape and prevents safe structured loop reconstruction.
         if (I.Op == LOP_CLOSEUPVALS)
         {
-            for (unsigned R = I.A; R < P.Stack; ++R)
-                if (ReferenceRegisters.test(R))
-                    Uses[J].set(R);
+            for (unsigned R = 0; R < I.A; ++R)
+                Uses[J].reset(R);
         }
         else
+        {
+            Uses[J].reset();
             for (auto R : Reads(I, P))
                 Uses[J].set(R);
+        }
         for (auto R : Writes(P.Instructions[J], P))
             Definitions[J].set(R);
         Queue.push(Count - J - 1);

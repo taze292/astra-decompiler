@@ -773,6 +773,86 @@ std::vector<Fixture> BytecodeFixtures()
         Builder.finalize();
         Result.push_back({"bytecode_observable_numeric_control", Builder.getBytecode(), true});
     }
+    {
+        Luau::BytecodeBuilder Builder;
+        auto Getter = Builder.beginFunction(0);
+        Builder.emitABC(LOP_GETUPVAL, 0, 0, 0);
+        Builder.emitABC(LOP_RETURN, 0, 2, 0);
+        Builder.endFunction(1, 1);
+        auto Iterator = Builder.beginFunction(2);
+        auto One = Builder.addConstantNumber(1);
+        auto Two = Builder.addConstantNumber(2);
+        Builder.emitAD(LOP_LOADN, 2, 3);
+        Builder.emitAD(LOP_JUMPIFNOTLT, 1, 4);
+        Builder.emitAux(2);
+        Builder.emitABC(LOP_ADDK, 0, 1, std::uint8_t(One));
+        Builder.emitABC(LOP_MULK, 1, 0, std::uint8_t(Two));
+        Builder.emitABC(LOP_RETURN, 0, 3, 0);
+        Builder.emitABC(LOP_LOADNIL, 0, 0, 0);
+        Builder.emitABC(LOP_LOADNIL, 1, 0, 0);
+        Builder.emitABC(LOP_RETURN, 0, 3, 0);
+        Builder.endFunction(3, 0);
+        auto Main = Builder.beginFunction(0);
+        Builder.emitAD(LOP_LOADN, 6, 17);
+        Builder.emitAD(LOP_NEWCLOSURE, 1, Builder.addChildFunction(Getter));
+        Builder.emitABC(LOP_CAPTURE, LCT_REF, 6, 0);
+        Builder.emitABC(LOP_CLOSEUPVALS, 6, 0, 0);
+        Builder.emitAD(LOP_LOADN, 0, 0);
+        Builder.emitAD(LOP_NEWCLOSURE, 2, Builder.addChildFunction(Iterator));
+        Builder.emitABC(LOP_LOADNIL, 3, 0, 0);
+        Builder.emitAD(LOP_LOADN, 4, 0);
+        Builder.emitAD(LOP_FORGPREP, 2, 1);
+        Builder.emitABC(LOP_ADD, 0, 0, 6);
+        Builder.emitAD(LOP_FORGLOOP, 2, -2);
+        Builder.emitAux(2);
+        Builder.emitABC(LOP_CLOSEUPVALS, 0, 0, 0);
+        Builder.emitABC(LOP_MOVE, 2, 1, 0);
+        Builder.emitABC(LOP_CALL, 2, 1, 2);
+        Builder.emitABC(LOP_MOVE, 1, 2, 0);
+        Builder.emitABC(LOP_RETURN, 0, 3, 0);
+        Builder.endFunction(9, 0);
+        Builder.setMainFunction(Main);
+        Builder.finalize();
+        Result.push_back({"bytecode_closed_capture_reused_by_loop", Builder.getBytecode(), true});
+    }
+    {
+        // Without CLOSEUPVALS between iterations, the bytecode intentionally
+        // shares one mutable binding. Native per-iteration locals would change it.
+        Luau::BytecodeBuilder Builder;
+        auto Getter = Builder.beginFunction(0);
+        Builder.emitABC(LOP_GETUPVAL, 0, 0, 0);
+        Builder.emitABC(LOP_RETURN, 0, 2, 0);
+        Builder.endFunction(1, 1);
+        auto Main = Builder.beginFunction(0);
+        Builder.emitABC(LOP_NEWTABLE, 0, 0, 0);
+        Builder.emitAux(0);
+        Builder.emitAD(LOP_LOADN, 1, 3);
+        Builder.emitAD(LOP_LOADN, 2, 1);
+        Builder.emitAD(LOP_LOADN, 3, 1);
+        auto Prepare = Builder.emitLabel();
+        Builder.emitAD(LOP_FORNPREP, 1, 0);
+        auto Body = Builder.emitLabel();
+        Builder.emitABC(LOP_MOVE, 4, 3, 0);
+        Builder.emitAD(LOP_NEWCLOSURE, 5, Builder.addChildFunction(Getter));
+        Builder.emitABC(LOP_CAPTURE, LCT_REF, 4, 0);
+        Builder.emitABC(LOP_SETTABLE, 5, 0, 3);
+        auto Tail = Builder.emitLabel();
+        Builder.emitAD(LOP_FORNLOOP, 1, 0);
+        auto End = Builder.emitLabel();
+        Builder.emitABC(LOP_CLOSEUPVALS, 4, 0, 0);
+        for (unsigned R = 1; R <= 3; ++R)
+        {
+            Builder.emitABC(LOP_GETTABLEN, std::uint8_t(R), 0, std::uint8_t(R - 1));
+            Builder.emitABC(LOP_CALL, std::uint8_t(R), 1, 2);
+        }
+        Builder.emitABC(LOP_RETURN, 1, 4, 0);
+        if (!Builder.patchJumpD(Prepare, End) || !Builder.patchJumpD(Tail, Body))
+            throw std::runtime_error("Shared loop capture fixture jump overflow");
+        Builder.endFunction(7, 0);
+        Builder.setMainFunction(Main);
+        Builder.finalize();
+        Result.push_back({"bytecode_loop_capture_without_close", Builder.getBytecode(), true});
+    }
     return Result;
 }
 } // namespace
@@ -788,6 +868,8 @@ int main(int Argc, char **Argv)
         {"bytecode_open_pack_snapshot", "3:1:7;"},
         {"bytecode_observable_iterator_control", "3:1:6;0:;"},
         {"bytecode_observable_numeric_control", "3:1:6;3:1:4;"},
+        {"bytecode_closed_capture_reused_by_loop", "3:2:12;3:2:17;"},
+        {"bytecode_loop_capture_without_close", "3:1:3;3:1:3;3:1:3;"},
     };
     auto Corpus = Fixtures();
     for (auto &Fixture : BytecodeFixtures())
@@ -831,8 +913,12 @@ int main(int Argc, char **Argv)
                         Source = Result.Source;
                         if (!Options.ForceStateMachine)
                             (Fixture.Serialized ? RawFallbacks : SourceFallbacks) += unsigned(Result.StateMachineFunctions);
-                        if (!Options.ForceStateMachine && Fixture.Name.starts_with("long_"))
+                        if (!Options.ForceStateMachine &&
+                            (Fixture.Name.starts_with("long_") || Fixture.Name == "loader_closed_captures_then_reused_loop_registers" ||
+                             Fixture.Name == "bytecode_closed_capture_reused_by_loop"))
                             Check(Result.StateMachineFunctions == 0, "A regular boolean chain required state-machine fallback");
+                        if (!Options.ForceStateMachine && Fixture.Name == "loader_shared_counter_callbacks")
+                            Check(Source.find("[1] }") == std::string::npos, "Shared outer counter retained a reference box");
                         if (!Options.ForceStateMachine &&
                             (Fixture.Name == "open_method_nil_holes" || Fixture.Name == "open_method_zero_results" ||
                              Fixture.Name == "open_method_nested_results" || Fixture.Name == "open_method_forward_varargs"))

@@ -108,6 +108,7 @@ class Function
     unsigned PackSymbol, TopSymbol, VarargsSymbol;
     bool NeedsPack = false, NeedsVarargs = false, NeedsDynamicTop = false;
     bool Dispatch = false;
+    bool RecoveredInline = false;
     std::string PendingMethod, PendingReceiver;
     unsigned PendingBase = 0;
     std::string OpenExpression;

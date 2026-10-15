@@ -7,6 +7,38 @@
 inline std::vector<std::pair<std::string, std::string>> ControlFlowCases()
 {
     std::vector<std::pair<std::string, std::string>> Cases = {
+        {"loader_shared_counter_callbacks", R"(
+local completed=0
+local callbacks={}
+for _,value in {2,3,5} do
+    callbacks[#callbacks+1]=function() completed+=value return completed end
+end
+local a=callbacks[1]()
+local b=callbacks[2]()
+local c=callbacks[3]()
+return a,b,c,completed
+)"},
+        {"loader_closed_captures_then_reused_loop_registers", R"(
+local saved,loaded={},{}
+local total,completed=0,0
+local function launch(fn) fn() end
+for key,value in {2,3,5} do
+    local finished=false
+    local success,result=nil,nil
+    saved[#saved+1]=function() return finished,success,result end
+    launch(function() success,result=true,value*2 end)
+    while success==nil do error('unfinished') end
+    finished=true
+    if success then loaded[key]=result total+=1 end
+end
+for key,value in loaded do launch(function() completed+=1 end) end
+while total~=completed do error('unfinished load') end
+local sum=0
+for key,value in {7,11,13} do if value>8 then sum+=value end end
+local function done() return sum end
+local result=done()
+return result,total,completed,saved[1](),saved[3]()
+)"},
         {"guard_before_generic_loop", R"(
 local function run(a,b)
     local log=''

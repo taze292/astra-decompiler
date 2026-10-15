@@ -8,15 +8,17 @@ Function::Function(Engine &Owner, unsigned Proto, std::vector<Upvalue> Captures,
 {
     if (Depth > E.Settings.MaxNesting)
         throw Error("Function nesting exceeds configured limit");
+    RecoveredInline = std::any_of(P.Instructions.begin(), P.Instructions.end(), [](const auto &I) { return I.Op == LOP_CMPPROTO; });
     for (const auto &I : P.Instructions)
         for (auto [Kind, R] : I.Captures)
             if (Kind == LCT_REF)
                 Cells.insert(R);
             else if (Kind == LCT_VAL)
                 HasCopyCaptures = true;
-    // A reference local can use native lexical capture when its identity never
-    // needs to be split. Keep boxes for loop-created captures and register reuse
-    // after CLOSEUPVALS; those require a separate lifetime per closure instance.
+    // A reference local can use native lexical capture while each closed
+    // lifetime is followed by a fresh definition before the register is read.
+    // This also permits per-iteration locals: native block scope closes them,
+    // and SSA keeps the next register lifetime separate.
     if (E.Settings.NativeCaptures && !E.Settings.ForceStateMachine)
         for (auto It = Cells.begin(); It != Cells.end();)
         {
@@ -33,6 +35,7 @@ Function::Function(Engine &Owner, unsigned Proto, std::vector<Upvalue> Captures,
                 std::vector<bool> Seen(P.Instructions.size());
                 std::vector<unsigned> Pending(Flow.Successors[J]);
                 bool ReadsClosed = false, EffectsAfterClose = false;
+                bool RepeatedCapture = false, WritesWhileOpen = false;
                 while (Safe && !Pending.empty())
                 {
                     unsigned N = Pending.back();
@@ -43,10 +46,21 @@ Function::Function(Engine &Owner, unsigned Proto, std::vector<Upvalue> Captures,
                     E.Analysis.Spend(1);
                     const auto &Next = P.Instructions[N];
                     auto Written = Writes(Next, P);
-                    auto Read = Close ? Reads(Next, P) : std::vector<unsigned>{};
+                    if (Capture && Next.Op == LOP_CLOSEUPVALS && R >= Next.A)
+                        continue;
+                    auto Read = Close && Next.Op != LOP_CLOSEUPVALS ? Reads(Next, P) : std::vector<unsigned>{};
+                    bool WritesRegister = std::find(Written.begin(), Written.end(), R) != Written.end();
+                    bool ReadsRegister = std::find(Read.begin(), Read.end(), R) != Read.end();
+                    if (Capture)
+                    {
+                        RepeatedCapture |= N == J;
+                        WritesWhileOpen |= WritesRegister;
+                    }
+                    if (Close && WritesRegister && !ReadsRegister)
+                        continue; // The detached value is never read on this path.
                     if (Close)
                     {
-                        ReadsClosed |= std::find(Read.begin(), Read.end(), R) != Read.end();
+                        ReadsClosed |= ReadsRegister;
                         // A just-closed return is safe. Other operations can
                         // mutate the detached upvalue or capture it anew.
                         switch (Next.Op)
@@ -69,11 +83,15 @@ Function::Function(Engine &Owner, unsigned Proto, std::vector<Upvalue> Captures,
                             EffectsAfterClose = true;
                         }
                     }
-                    if ((Capture && N == J) || (Close && std::find(Written.begin(), Written.end(), R) != Written.end()) ||
-                        (ReadsClosed && EffectsAfterClose))
+                    if ((Close && WritesRegister) || (ReadsClosed && EffectsAfterClose))
                         Safe = false;
                     Pending.insert(Pending.end(), Flow.Successors[N].begin(), Flow.Successors[N].end());
                 }
+                // Repeatedly capturing an unchanged outer local keeps one
+                // shared lexical identity. Reinitialized loop registers without
+                // a close still need a box to avoid inventing fresh upvalues.
+                if (RepeatedCapture && WritesWhileOpen)
+                    Safe = false;
             }
             if (Safe)
             {

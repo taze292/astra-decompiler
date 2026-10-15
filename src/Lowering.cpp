@@ -275,7 +275,9 @@ std::string Function::Closure(const Instruction &I, std::vector<Statement> &Out)
     }
     std::string Body = Nested.Generate();
     std::string Text = "function" + Nested.Signature();
-    if (E.Settings.IncludeLineComments)
+    if (Nested.RecoveredInline)
+        Text += " -- Uninlined by Taze's Decompiler";
+    else if (E.Settings.IncludeLineComments)
     {
         Text += " -- Line: " + (E.C.Prototypes[Child].Line ? std::to_string(E.C.Prototypes[Child].Line) : "Unknown");
         if (E.Settings.IncludeFunctionLocators && (E.Settings.IncludeGcLocators || E.AnalyzeExports()))

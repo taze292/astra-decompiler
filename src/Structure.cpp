@@ -13,38 +13,45 @@ bool Conditional(LuauOpcode Op)
 
 namespace
 {
-bool NativeGenericLoop(const Prototype &P, const ControlFlow &Flow, unsigned Head, unsigned Tail, AnalysisBudget &Budget)
+bool NativeGenericLoop(const Prototype &P, const ControlFlow &Flow, unsigned Head, unsigned Tail, AnalysisBudget &Budget,
+                       std::string *Failure = nullptr)
 {
+    auto Reject = [&](const std::string &Reason)
+    {
+        if (Failure)
+            *Failure = Reason;
+        return false;
+    };
     const auto &I = P.Instructions[Head];
     const auto &End = P.Instructions[Tail];
     if (Tail <= Head || End.Op != LOP_FORGLOOP || End.A != I.A || End.Target() != int(I.Next))
-        return false;
+        return Reject("noncanonical preparation/tail");
     // The native for statement owns its hidden iterator state. The bytecode
     // must not inspect that state or enter the body without running preparation.
     for (unsigned R = I.A; R < I.A + 3 + (End.Aux & 255); ++R)
         if (Flow.LiveIn[Tail + 1].test(R))
-            return false;
+            return Reject("register " + std::to_string(R) + " live after loop at " + std::to_string(End.Next));
     for (unsigned K = Head + 1; K <= Tail; ++K)
     {
         Budget.Spend(1 + Flow.Predecessors[K].size() + Flow.Successors[K].size());
         for (unsigned Before : Flow.Predecessors[K])
             if (Before < Head || Before > Tail)
-                return false;
+                return Reject("outside entry at " + std::to_string(P.Instructions[K].Pc));
         for (unsigned After : Flow.Successors[K])
             if (After <= Head || After > Tail)
                 for (unsigned R = I.A; R < I.A + 3; ++R)
                     if (Flow.LiveIn[After].test(R))
-                        return false;
+                        return Reject("hidden register " + std::to_string(R) + " live on exit at " + std::to_string(P.Instructions[K].Pc));
         if (K == Tail)
             continue;
         const auto &Body = P.Instructions[K];
         if (Body.Op != LOP_CLOSEUPVALS)
             for (unsigned R : Reads(Body, P))
                 if (R >= I.A && R < I.A + 3)
-                    return false;
+                    return Reject("hidden register " + std::to_string(R) + " read at " + std::to_string(Body.Pc));
         for (unsigned R : Writes(Body, P))
             if (R >= I.A && R < I.A + 3)
-                return false;
+                return Reject("hidden register " + std::to_string(R) + " written at " + std::to_string(Body.Pc));
     }
     return true;
 }
@@ -120,8 +127,9 @@ std::vector<Statement> Function::Region(unsigned Start, unsigned End, int BreakT
             const auto &Tail = P.Instructions[Finish];
             if (Tail.Op != LOP_FORGLOOP || Tail.A != I.A || Tail.Target() != int(I.Next))
                 throw Unstructured("noncanonical generic loop");
-            if (!NativeGenericLoop(P, Flow, Pos, Finish, E.Analysis))
-                throw Unstructured("generic loop has external entries or observable hidden state");
+            std::string Failure;
+            if (!NativeGenericLoop(P, Flow, Pos, Finish, E.Analysis, &Failure))
+                throw Unstructured("generic loop at " + std::to_string(I.Pc) + ": " + Failure);
             Statement Loop{Kind::For};
             std::vector<std::string> Vars;
             for (unsigned J = 0; J < (Tail.Aux & 255); ++J)
@@ -333,7 +341,10 @@ std::vector<Statement> Function::StateMachine()
     OpenExpressionBase = 0;
     OpenHint.clear();
     unsigned PcSymbol = E.New("ProgramCounter", Id, true);
-    std::vector<Statement> Out{{Kind::Raw, {}, "-- Control flow required an explicit state machine."}, {Kind::Assign, {PcSymbol}, "0"}};
+    std::vector<Statement> Out;
+    if (!RecoveredInline)
+        Out.push_back({Kind::Raw, {}, "-- Control flow required an explicit state machine."});
+    Out.push_back({Kind::Assign, {PcSymbol}, "0"});
     Statement Loop{Kind::While, {}, "true"};
     std::map<unsigned, unsigned> IteratorSymbols;
     std::map<unsigned, unsigned> NativeLoops;
