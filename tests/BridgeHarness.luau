@@ -38,7 +38,7 @@ end
 
 local Passed = 0
 for _, Mode in { "Line", "StartLine", "Both", "Ignored", "Missing", "Hidden" } do
-    local Environment = { Time = 0, Connects = 0 }
+    local Environment = { Time = 0, Connects = 0, TazeConfig = {} }
     Environment.Game = Instance("Game", "DataModel")
     local Players = Instance("Players", "Players", Environment.Game)
     Players.LocalPlayer = Instance("TestPlayer", "Player", Players)
@@ -95,7 +95,7 @@ for _, Mode in { "Line", "StartLine", "Both", "Ignored", "Missing", "Hidden" } d
     assert(Bridge.FilterLineField == Expected, "Wrong detected line field for " .. Mode)
     assert(Bridge.LineProbe == (if Mode == "Ignored" or Mode == "Missing" or Mode == "Hidden" then "fallback" else "verified"))
     assert(Environment.decompile(Target) == "return 1")
-    assert(Bridge.Version == 4 and Bridge.Decompile == Environment.decompile)
+    assert(Bridge.Version == 5 and Bridge.Decompile == Environment.decompile)
     assert(Environment.decompile({}) == nil, "Invalid targets must exit silently")
     assert(Environment.decompile(Target, 0) == nil, "Invalid timeouts must exit silently")
     local SavedBytecode = Target.Bytecode
@@ -107,7 +107,9 @@ for _, Mode in { "Line", "StartLine", "Both", "Ignored", "Missing", "Hidden" } d
     else
         assert(Original(Target) == "original")
     end
-    local Field, HexPath, Bytecode = Environment.Message:match("TAZE2\n([^\n]+)\n([^\n]*)\n(.+)$")
+    assert(Environment.decompile(Target) == "return 1")
+    local Field, HexPath, Options, Bytecode = Environment.Message:match("TAZE3\n([^\n]+)\n([^\n]*)\n([^\n]*)\n(.+)$")
+    assert(Options == "")
     assert(Field == Expected and Bytecode == "090300ff")
     local Path = HexPath:gsub("..", function(Pair) return string.char(tonumber(Pair, 16)) end)
     assert(Path == 'game:GetService("Players").LocalPlayer:FindFirstChild("PlayerScripts"):FindFirstChild("Quoted\\\"\\010\\255")', Path)
@@ -131,6 +133,24 @@ for _, Mode in { "Line", "StartLine", "Both", "Ignored", "Missing", "Hidden" } d
     Environment.ServerError = true
     assert(Environment.decompile(Target) == nil, "Server errors must exit silently")
     Environment.ServerError = false
+    assert(Bridge.LastError == "mock server failure" and Bridge.LastRequest.Succeeded == false)
+    Environment.TazeConfig.Options = { casing = "snake", ["gc-locators"] = false }
+    assert(Environment.decompile(Target, { naming = "generic", ["require-locators"] = false }) == "return 1")
+    assert(Bridge.LastError == nil and Bridge.LastRequest.Succeeded)
+    assert(Bridge.LastRequest.ModulePath == "" and Bridge.LastRequest.PathStatus == "require lookups disabled")
+    assert(Bridge.LastRequest.Options.casing == "snake" and Bridge.LastRequest.Options.naming == "generic")
+    local HexOptions = Environment.Message:match("TAZE3\n[^\n]*\n[^\n]*\n([^\n]*)\n")
+    local OptionBlock = HexOptions:gsub("..", function(Pair) return string.char(tonumber(Pair, 16)) end)
+    assert(OptionBlock == "casing=snake;gc-locators=false;naming=generic;require-locators=false", OptionBlock)
+    assert(Environment.TazeConfig.Options.naming == nil, "Per-call overrides mutated defaults")
+    assert(Environment.decompile(Target, { casing = "snake;header=false" }) == nil)
+    assert(Bridge.LastError:find("Invalid option value", 1, true))
+    assert(Environment.decompile(Target, { ["module-path"] = "game" }) == nil)
+    Environment.TazeConfig.ErrorMode = "raise"
+    local Success, Failure = pcall(Environment.decompile, {})
+    assert(not Success and tostring(Failure):find("Expected a script Instance", 1, true))
+    Environment.TazeConfig.ErrorMode = nil
+    Environment.TazeConfig.Options = nil
     local SavedWrapper
     SavedWrapper = function(...) return Implementations[SavedWrapper](...) end
     Implementations[SavedWrapper] = function() return "wrapper" end

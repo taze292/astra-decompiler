@@ -94,6 +94,19 @@ try {
     $Large = Fixture 'large' ('return "' + ('a' * 70000) + '"')
     $Module = Fixture 'module' 'local M={}; function M.Read() return 17 end; return M'
     $Socket = Connect-Bridge
+    function Option-Hex([string]$Text) { [BitConverter]::ToString([Text.Encoding]::ASCII.GetBytes($Text)).Replace('-', '') }
+    $OptionHex = Option-Hex 'casing=snake;header=false;gc-locators=false;require-locators=false'
+    Send-Text $Socket ("100`nTAZE3`nLine`n`n$OptionHex`n" + $Module.Hex)
+    $Configured = Receive-Text $Socket
+    Check ($Configured.StartsWith("100`nok`n") -and -not $Configured.Contains('Decompiled by Taze') -and -not $Configured.Contains(' | ')) 'Per-request options failed'
+    foreach ($Bad in @('casing=invalid', 'indent=2junk', 'header=true;header=false', 'module-path=game', 'max-output-bytes=268435456', 'header=false;', 'unknown=true')) {
+        $BadHex = Option-Hex $Bad
+        Send-Text $Socket ("101`nTAZE3`nLine`n`n$BadHex`n" + $Small.Hex)
+        Check ((Receive-Text $Socket).StartsWith("101`nerror`n")) "Invalid request options accepted: $Bad"
+    }
+    $OptionHex = Option-Hex 'max-output-bytes=1'
+    Send-Text $Socket ("102`nTAZE3`nLine`n`n$OptionHex`n" + $Small.Hex)
+    Check ((Receive-Text $Socket).StartsWith("102`nerror`n")) 'Per-request output cap ignored'
     Send-Text $Socket ("1`n" + $Small.Hex)
     Check ((Receive-Text $Socket) -ceq ("1`nok`n" + $Small.Source)) 'WebSocket output differs from CLI output'
     Send-Text $Socket '2' $false

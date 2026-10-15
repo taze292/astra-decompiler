@@ -59,6 +59,11 @@ if(TAZE_BUILD_TESTS)
                 -Executable $<TARGET_FILE:taze> -Compiler $<TARGET_FILE:taze-compile>
                 -WorkDirectory "${CMAKE_CURRENT_BINARY_DIR}/WebSocketTests")
             set_tests_properties(WebSocketBridge PROPERTIES TIMEOUT 60)
+            add_test(NAME BatchCLI COMMAND "${TAZE_POWERSHELL}" -NoProfile -ExecutionPolicy Bypass
+                -File "${CMAKE_CURRENT_SOURCE_DIR}/tests/Batch.ps1"
+                -Executable $<TARGET_FILE:taze> -Compiler $<TARGET_FILE:taze-compile>
+                -WorkDirectory "${CMAKE_CURRENT_BINARY_DIR}/BatchTests")
+            set_tests_properties(BatchCLI PROPERTIES TIMEOUT 60)
         endif()
     endif()
 endif()

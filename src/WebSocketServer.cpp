@@ -13,6 +13,7 @@
 #include <cctype>
 #include <iostream>
 #include <map>
+#include <set>
 #include <sstream>
 #include <syncstream>
 #include <thread>
@@ -202,7 +203,8 @@ std::string Process(std::string_view Request, const Options &Settings)
                 Bytes[I] = char((Digit(Hex[I * 2]) << 4) | Digit(Hex[I * 2 + 1]));
             return Bytes;
         };
-        if (Request.starts_with("TAZE2\n"))
+        bool HasOptions = Request.starts_with("TAZE3\n");
+        if (HasOptions || Request.starts_with("TAZE2\n"))
         {
             Request.remove_prefix(6);
             auto Line = [&]()
@@ -216,10 +218,36 @@ std::string Process(std::string_view Request, const Options &Settings)
             };
             RequestSettings.FilterLineField = std::string(Line());
             RequestSettings.ModulePath = Decode(Line(), 8192);
+            if (HasOptions)
+            {
+                auto Block = Decode(Line(), 4096);
+                std::set<std::string> Seen;
+                std::string_view Remaining = Block;
+                while (!Remaining.empty())
+                {
+                    auto End = Remaining.find(';');
+                    auto Entry = Remaining.substr(0, End);
+                    auto Equals = Entry.find('=');
+                    if (Equals == std::string_view::npos || Equals == 0 || Equals + 1 == Entry.size())
+                        throw Error("Invalid bridge option entry");
+                    auto Key = Entry.substr(0, Equals);
+                    if (Key == "module-path" || Key == "filter-line" || !Seen.insert(std::string(Key)).second)
+                        throw Error("Duplicate or reserved bridge option");
+                    ApplyOption(RequestSettings, Key, Entry.substr(Equals + 1));
+                    if (End == std::string_view::npos) break;
+                    Remaining.remove_prefix(End + 1);
+                    if (Remaining.empty()) throw Error("Empty trailing bridge option");
+                }
+                // Remote requests may lower the host's resource caps, never raise them.
+                if (RequestSettings.MaxInputBytes > Settings.MaxInputBytes || RequestSettings.MaxOutputBytes > Settings.MaxOutputBytes ||
+                    RequestSettings.MaxAnalysisCells > Settings.MaxAnalysisCells || RequestSettings.MaxNesting > Settings.MaxNesting)
+                    throw Error("Request options exceed server resource limits");
+            }
         }
         if (Request.empty())
             throw Error("Empty bytecode payload");
-        auto Bytes = Decode(Request, Settings.MaxInputBytes);
+        ValidateOptions(RequestSettings);
+        auto Bytes = Decode(Request, RequestSettings.MaxInputBytes);
         auto Result = Decompile(Bytes, RequestSettings);
         std::osyncstream(std::cout) << "Request " << Id << ": " << Bytes.size() << " bytecode bytes -> " << Result.Source.size()
                                     << " source bytes, " << Result.StateMachineFunctions << " fallback functions\n";
@@ -266,7 +294,7 @@ void Session(SOCKET Client, const Options &Settings)
         }
         if (Opcode >= 8 && (!Final || Size > 125))
             throw Error("Invalid control frame");
-        if (Size > Settings.MaxInputBytes * 2 + 16448 || Size + Message.size() > Settings.MaxInputBytes * 2 + 16448)
+        if (Size > Settings.MaxInputBytes * 2 + 32768 || Size + Message.size() > Settings.MaxInputBytes * 2 + 32768)
             throw Error("WebSocket message exceeds bytecode size limit");
         std::array<char, 4> Mask{};
         Read(Client, Mask.data(), Mask.size());

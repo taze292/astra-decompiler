@@ -4,6 +4,10 @@ local Environment = getgenv and getgenv() or getfenv(0)
 local Config = if type(Environment.TazeConfig) == "table" then Environment.TazeConfig else {}
 local Url = Config.Url or "ws://127.0.0.1:8877/decompile"
 local DefaultTimeout = Config.Timeout or 30
+local MaxPending = Config.MaxPending or 32
+if type(MaxPending) ~= "number" or MaxPending % 1 ~= 0 or MaxPending < 1 or MaxPending > 128 then
+    return nil
+end
 local GetBytecode = getscriptbytecode or Environment.getscriptbytecode
 if type(GetBytecode) ~= "function" or type(DefaultTimeout) ~= "number" or DefaultTimeout <= 0 or DefaultTimeout >= math.huge then
     return nil
@@ -19,7 +23,7 @@ local Previous = Environment.TazeBridge
 local PreviousDecompile = Environment.decompile or decompile
 local IsPreviousBridge = type(Previous) == "table" and Previous.Marker == "TazeBridge1"
 local Original = if IsPreviousBridge then Previous.Original else Environment.decompile or decompile
-local Bridge = { Marker = "TazeBridge1", Version = 4, Original = Original, Url = Url, Connected = false }
+local Bridge = { Marker = "TazeBridge1", Version = 5, Original = Original, Url = Url, Connected = false }
 local HookTargets = { Original, PreviousDecompile }
 if IsPreviousBridge and type(Previous.HookTargets) == "table" then
     for _, Target in Previous.HookTargets do
@@ -89,7 +93,14 @@ local function DetectLineField()
     return "Line", "fallback"
 end
 
-Bridge.FilterLineField, Bridge.LineProbe = DetectLineField()
+local function GcEnabled(Options)
+    return Options.lines ~= false and Options.locators ~= false and Options["gc-locators"] ~= false
+end
+if type(Config.Options) ~= "table" or GcEnabled(Config.Options) then
+    Bridge.FilterLineField, Bridge.LineProbe = DetectLineField()
+else
+    Bridge.FilterLineField, Bridge.LineProbe = "Line", "disabled"
+end
 
 local function QuoteName(Name)
     return '"' .. Name:gsub(".", function(Character)
@@ -243,47 +254,88 @@ for Byte = 0, 255 do
     Hex[string.char(Byte)] = string.format("%02x", Byte)
 end
 
-local function Decompile(Target, Timeout)
+local function RequestOptions(Overrides)
+    if Config.Options ~= nil and type(Config.Options) ~= "table" then
+        error("TazeConfig.Options must be a table")
+    end
+    if Overrides ~= nil and type(Overrides) ~= "table" then
+        error("Per-call options must be a table")
+    end
+    local Options = {}
+    for Key, Value in Config.Options or {} do Options[Key] = Value end
+    for Key, Value in Overrides or {} do Options[Key] = Value end
+    local Keys = {}
+    for Key, Value in Options do
+        if type(Key) ~= "string" or not Key:match("^[a-z][a-z%-]*$") or Key == "module-path" or Key == "filter-line" then
+            error("Invalid or reserved option key: " .. tostring(Key))
+        end
+        if type(Value) ~= "string" and type(Value) ~= "number" and type(Value) ~= "boolean" then
+            error("Invalid option value for " .. Key)
+        end
+        local Text = tostring(Value)
+        if Text == "" or Text:find("[;=\r\n]") then error("Invalid option value for " .. Key) end
+        table.insert(Keys, Key)
+    end
+    table.sort(Keys)
+    local Entries = {}
+    for _, Key in Keys do table.insert(Entries, Key .. "=" .. tostring(Options[Key])) end
+    local Block = table.concat(Entries, ";")
+    if #Block > 4096 then error("Option block exceeds 4096 bytes") end
+    return Options, Block:gsub(".", Hex)
+end
+
+local function Decompile(Target, Timeout, Overrides)
     if typeof(Target) ~= "Instance" or not (Target:IsA("LocalScript") or Target:IsA("ModuleScript") or Target:IsA("Script")) then
-        return nil
+        return nil, "Expected a script Instance"
+    end
+    if type(Timeout) == "table" then
+        if Overrides ~= nil then return nil, "Options were supplied twice" end
+        Overrides, Timeout = Timeout, nil
     end
     Timeout = Timeout or DefaultTimeout
     if type(Timeout) ~= "number" or Timeout <= 0 or Timeout >= math.huge then
-        return nil
+        return nil, "Timeout must be a positive finite number"
+    end
+    local Options, EncodedOptions = RequestOptions(Overrides)
+    if GcEnabled(Options) and Bridge.LineProbe == "disabled" then
+        Bridge.FilterLineField, Bridge.LineProbe = DetectLineField()
     end
     local Deadline = os.clock() + Timeout
     local Current = EnsureConnected(Deadline)
     if not Current then
-        return nil
+        return nil, if Stopped then "Taze bridge stopped" else "Taze connection failed or timed out"
     end
     local Ok, Bytecode = pcall(GetBytecode, Target)
     if not Ok or type(Bytecode) ~= "string" or #Bytecode == 0 or #Bytecode > 64 * 1024 * 1024 then
-        return nil
+        return nil, "Could not obtain nonempty bytecode within the 64 MiB bridge limit"
     end
     local Encoded = Bytecode:gsub(".", Hex)
-    local Expression, PathStatus = ModulePath(Target)
+    local Expression, PathStatus = "", "require lookups disabled"
+    if Options.lines ~= false and Options.locators ~= false and Options["require-locators"] ~= false then
+        Expression, PathStatus = ModulePath(Target)
+    end
     local Path = Expression:gsub(".", Hex)
     if os.clock() >= Deadline then
-        return nil
+        return nil, "Timed out while preparing bytecode"
     end
     NextId += 1
     local Id = tostring(NextId)
     local Request = {}
     Pending[Id] = Request
     local Sent, SendError = pcall(function()
-        Current:Send(Id .. "\nTAZE2\n" .. Bridge.FilterLineField .. "\n" .. Path .. "\n" .. Encoded)
+        Current:Send(Id .. "\nTAZE3\n" .. Bridge.FilterLineField .. "\n" .. Path .. "\n" .. EncodedOptions .. "\n" .. Encoded)
     end)
     if not Sent then
         Pending[Id] = nil
         Disconnect("Taze send failed: " .. tostring(SendError))
-        return nil
+        return nil, "Taze send failed: " .. tostring(SendError)
     end
     while not Request.Done and os.clock() < Deadline do
         task.wait()
     end
     Pending[Id] = nil
     if not Request.Done or Request.Error or type(Request.Source) ~= "string" then
-        return nil
+        return nil, Request.Error or "Taze request timed out"
     end
     local _, ExportCount = Request.Source:gsub(" | require%(", "")
     local _, GcCount = Request.Source:gsub(" | filtergc%(", "")
@@ -293,13 +345,34 @@ local function Decompile(Target, Timeout)
         ExportLookups = ExportCount,
         GcLookups = GcCount,
         FilterLineField = Bridge.FilterLineField,
+        Options = Options,
+        InputBytes = #Bytecode,
+        OutputBytes = #Request.Source,
     }
     return Request.Source
 end
 
+local ActiveRequests = 0
 Installed = function(...)
-    local Ok, Result = pcall(Decompile, ...)
-    return if Ok then Result else nil
+    local Started = os.clock()
+    local Ok, Result, Failure
+    if ActiveRequests >= MaxPending then
+        Ok, Failure = true, "Taze pending request limit reached"
+    else
+        ActiveRequests += 1
+        Ok, Result, Failure = pcall(Decompile, ...)
+        ActiveRequests -= 1
+    end
+    if Ok and Result ~= nil then
+        Bridge.LastError = nil
+        Bridge.LastRequest.Succeeded = true
+        Bridge.LastRequest.ElapsedSeconds = os.clock() - Started
+        return Result
+    end
+    Bridge.LastError = tostring(if Ok then Failure or "Taze decompilation failed" else Result)
+    Bridge.LastRequest = { Succeeded = false, Error = Bridge.LastError, ElapsedSeconds = os.clock() - Started }
+    if Config.ErrorMode == "raise" then error(Bridge.LastError, 2) end
+    return nil
 end
 
 function Bridge.Stop()
@@ -354,5 +427,5 @@ end
 Environment.decompile = Installed
 Bridge.Decompile = Installed
 Environment.TazeBridge = Bridge
-pcall(print, "Taze decompile v4 installed: " .. Url .. " | require export lookups | " .. Bridge.FilterLineField .. " (" .. Bridge.LineProbe .. ") | cached references: " .. Bridge.HookStatus)
+pcall(print, "Taze decompile v5 installed: " .. Url .. " | per-call options | " .. Bridge.FilterLineField .. " (" .. Bridge.LineProbe .. ") | cached references: " .. Bridge.HookStatus)
 return Bridge
