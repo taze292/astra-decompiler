@@ -13,7 +13,10 @@ if(NOT EXISTS "${TAZE_LUAU_DIR}/Common/include/Luau/Bytecode.h")
     message(FATAL_ERROR "Set TAZE_LUAU_DIR to a Luau checkout. See README.md.")
 endif()
 
-add_library(TazeDecompiler src/Bytecode.cpp src/ControlFlow.cpp src/Exports.cpp src/Decompiler.cpp)
+add_library(TazeDecompiler
+    src/Bytecode.cpp src/ControlFlow.cpp src/Exports.cpp src/Decompiler.cpp
+    src/Expressions.cpp src/Symbols.cpp src/Analysis.cpp src/Lowering.cpp
+    src/Structure.cpp src/Optimize.cpp src/Render.cpp)
 target_include_directories(TazeDecompiler PUBLIC include PRIVATE "${TAZE_LUAU_DIR}/Common/include")
 if(MSVC)
     target_compile_options(TazeDecompiler PRIVATE /W4 /EHsc)
