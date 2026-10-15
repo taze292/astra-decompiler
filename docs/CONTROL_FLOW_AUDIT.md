@@ -105,8 +105,8 @@ Final benchmark CSVs and generated comparisons are under `artifacts/controlflow/
 ./build/Release/astra-control-flow-tests.exe
 ./build/Release/astra-control-flow-tests.exe open_method
 ./build/Release/astra-inline-recovery-tests.exe
-./tools/BenchmarkCorpus.ps1 -Inputs @('artifacts/rewrite/CameraModule.live.luac', 'artifacts/rewrite/Corpus.luac', 'artifacts/readability/CaptureLifetimes.luac', 'artifacts/controlflow/or20.luac') -BaselineDirectory artifacts/controlflow/baseline -OutputDirectory artifacts/controlflow/final-benchmark -Samples 300
-./tools/ValidateCorpus.ps1 -BaselineDirectory artifacts/controlflow/baseline -OutputDirectory artifacts/controlflow/final-source-corpus -Samples 150
+./dev/tools/BenchmarkCorpus.ps1 -Inputs @('artifacts/rewrite/CameraModule.live.luac', 'artifacts/rewrite/Corpus.luac', 'artifacts/readability/CaptureLifetimes.luac', 'artifacts/controlflow/or20.luac') -BaselineDirectory artifacts/controlflow/baseline -OutputDirectory artifacts/controlflow/final-benchmark -Samples 300
+./dev/tools/ValidateCorpus.ps1 -BaselineDirectory artifacts/controlflow/baseline -OutputDirectory artifacts/controlflow/final-source-corpus -Samples 150
 ```
 
 Artifacts are ignored. A fresh checkout needs locally compiled equivalents and a baseline build from `e91ccc2`. Benchmark defaults differ in the requested upvalue presentation: the baseline uses compact comments; the new default uses numbered multiline comments. Timings compare the user-facing defaults with headers disabled, not identical output text. No universal speed or bug-free claim follows from these tests.

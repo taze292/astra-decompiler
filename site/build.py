@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import html
 from html.parser import HTMLParser
+import json
 import os
 from pathlib import Path
 import re
@@ -20,7 +21,8 @@ from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 ROOT = Path(__file__).resolve().parent.parent
 PREFERRED_ORDER = (
-    "OPTIONS", "ARCHITECTURE", "ASTRA_MIGRATION", "GITHUB_PAGES", "ASTRA_VALIDATION",
+    "INDEX", "GETTING_STARTED", "CUSTOMIZATION", "SETUPS", "OPTIONS", "GITHUB_PAGES",
+    "OBFUSCATED_CONTROL_FLOW", "ARCHITECTURE", "ASTRA_MIGRATION", "ASTRA_VALIDATION",
     "INLINE_RECOVERY", "UNIVERSAL_CONTROL_FLOW", "CONTROL_FLOW_AUDIT",
     "PERFORMANCE", "VALIDATION", "READABILITY_REWRITE", "REWRITE_PLAN",
 )
@@ -97,6 +99,10 @@ class Markdown:
             return urlunsplit(("", "", destination, parts.query, parts.fragment))
         if path == ROOT / "docs" / "Luau-LICENSE.txt":
             return "luau-license.txt"
+        if path.is_relative_to(ROOT / "site" / "assets"):
+            if not path.is_file():
+                raise ValueError(f"Missing site asset: {path}")
+            return "assets/" + quote(path.relative_to(ROOT / "site" / "assets").as_posix(), safe="/")
         if not path.exists():
             raise ValueError(f"Missing local link in {self.source.relative_to(ROOT)}: {target}")
         return self.source_url(path) + (f"#{parts.fragment}" if parts.fragment else "")
@@ -162,7 +168,8 @@ class Markdown:
                 if index == len(lines):
                     raise ValueError(f"Unclosed code fence in {self.source}")
                 language_class = f' class="language-{html.escape(language, quote=True)}"' if re.fullmatch(r"[\w+-]+", language) else ""
-                output.append(f"<pre><code{language_class}>{html.escape(chr(10).join(code))}\n</code></pre>")
+                label = html.escape(language or "text")
+                output.append(f'<div class="code-block"><div class="code-toolbar"><span>{label}</span><button type="button" class="copy-code" aria-label="Copy {label} code" hidden>Copy</button></div><pre><code{language_class}>{html.escape(chr(10).join(code))}\n</code></pre></div>')
                 index += 1
                 continue
             heading = re.match(r"^(#{1,6})\s+(.+?)(?:\s+#+)?$", line)
@@ -295,46 +302,66 @@ def build(output: Path, repository: str, ref: str) -> None:
         PREFERRED_ORDER.index(path.stem) if path.stem in PREFERRED_ORDER else len(PREFERRED_ORDER), path.name,
     )))
     documents.append(ROOT / "THIRD_PARTY_NOTICES.md")
-    pages = {source.resolve(): ("index.html" if source.name == "README.md" else source.stem.lower().replace("_", "-") + ".html") for source in documents}
+    documents.append(ROOT / "dev" / "README.md")
+    pages = {source.resolve(): ("development.html" if source == ROOT / "dev" / "README.md" else "repository.html" if source.name == "README.md" else "index.html" if source.stem == "INDEX" else source.stem.lower().replace("_", "-") + ".html") for source in documents}
     if len(set(pages.values())) != len(pages):
         raise ValueError("Documentation filenames produce duplicate site routes")
     output.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(ROOT / "site" / "styles.css", output / "styles.css")
+    shutil.copyfile(ROOT / "site" / "app.js", output / "app.js")
+    shutil.copytree(ROOT / "site" / "assets", output / "assets", dirs_exist_ok=True)
     shutil.copyfile(ROOT / "docs" / "Luau-LICENSE.txt", output / "luau-license.txt")
     (output / ".nojekyll").write_text("", encoding="utf-8")
     titles = {source: document_title(source) for source in documents}
+    guide_names = ("INDEX", "GETTING_STARTED", "CUSTOMIZATION", "SETUPS")
+    reference_names = ("OPTIONS", "GITHUB_PAGES", "ASTRA_MIGRATION")
+    labels = {"INDEX": "Introduction", "GETTING_STARTED": "Getting started", "CUSTOMIZATION": "Customization", "SETUPS": "Other setups", "OPTIONS": "All options", "GITHUB_PAGES": "Publishing the docs", "ASTRA_MIGRATION": "Migration", "OBFUSCATED_CONTROL_FLOW": "Control-flow validation (0.5)", "ASTRA_VALIDATION": "Validation (0.4)"}
+    search_index = []
     for source in documents:
         renderer = Markdown(source, pages, repository, ref)
         body = renderer.render(source.read_text(encoding="utf-8-sig"))
-        links = "\n".join(
-            f'<li><a href="{pages[document.resolve()]}"' + (' aria-current="page"' if document == source else "") + f'>{html.escape("Overview" if document.name == "README.md" else titles[document])}</a></li>'
-            for document in documents
-        )
+        def navigation(items: list[Path]) -> str:
+            return "\n".join(f'<li><a href="{pages[document.resolve()]}"' + (' aria-current="page"' if document == source else "") + f'>{html.escape("Developer guide" if document == ROOT / "dev" / "README.md" else labels.get(document.stem, "Repository overview" if document.name == "README.md" else titles[document]))}</a></li>' for document in items)
+
+        guides = [document for name in guide_names for document in documents if document.stem == name]
+        reference = [document for name in reference_names for document in documents if document.stem == name]
+        developer = [document for document in documents if document not in guides + reference]
+        developer.sort(key=lambda document: 0 if document == ROOT / "dev" / "README.md" else 1 if document.stem == "OBFUSCATED_CONTROL_FLOW" else 2 if document.stem == "ARCHITECTURE" else 3)
+        developer_open = " open" if source in developer else ""
+        links = f'<section class="nav-group"><h2>Essentials</h2><ul>{navigation(guides)}</ul></section><section class="nav-group"><h2>Reference</h2><ul>{navigation(reference)}</ul></section><details class="nav-group developer-notes"{developer_open}><summary>Developer notes</summary><ul>{navigation(developer)}</ul></details>'
         toc = "\n".join(f'<li><a href="#{slug}">{html.escape(title)}</a></li>' for level, title, slug in renderer.headings if level == 2)
-        toc_html = f'<details class="contents"><summary>On this page</summary><ul>{toc}</ul></details>' if toc else ""
+        toc_html = f'<aside class="contents" aria-label="On this page"><p>On this page</p><ul>{toc}</ul></aside>' if toc else ""
+        search_text = re.sub(r"\s+", " ", plain_text(re.sub(r"```[\s\S]*?```", "", source.read_text(encoding="utf-8-sig"))))
+        search_index.append({"title": titles[source], "url": pages[source.resolve()], "text": search_text[:18000], "headings": [title for level, title, slug in renderer.headings if level == 2]})
+        group = "Essentials" if source in guides else "Reference" if source in reference else "Developer notes"
         source_url = html.escape(renderer.source_url(source), quote=True)
         page = f'''<!doctype html>
 <html lang="en">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Astra Luau decompiler documentation: configuration, architecture, validation, and setup.">
+    <meta name="description" content="Set up Astra and customize Luau decompilation. Guides, configuration, and developer documentation.">
     <title>{html.escape(titles[source])} · Astra</title>
     <link rel="stylesheet" href="styles.css">
+    <link rel="icon" href="assets/astra.svg" type="image/svg+xml">
+    <script src="app.js" defer></script>
 </head>
 <body>
     <a class="skip-link" href="#content">Skip to content</a>
-    <header class="site-header"><a class="brand" href="index.html">Astra</a><span>Luau decompiler</span><a href="https://github.com/{html.escape(repository, quote=True)}">GitHub</a></header>
+    <header class="site-header"><a class="brand" href="index.html"><img src="assets/astra.svg" alt="" width="30" height="30">Astra<span class="brand-divider"></span><span class="brand-label">Documentation</span></a><div class="header-actions"><button type="button" class="search-trigger" hidden><span>Search documentation</span><kbd>Ctrl K</kbd></button><a class="github-link" href="https://github.com/{html.escape(repository, quote=True)}">GitHub<span aria-hidden="true"> ↗</span></a><button type="button" class="mobile-toggle" aria-controls="documentation-nav" aria-expanded="false" hidden>Menu</button></div></header>
     <div class="layout">
-        <nav class="sidebar" aria-label="Documentation"><details open><summary>Documentation</summary><ul>{links}</ul></details></nav>
-        <main id="content" tabindex="-1">{toc_html}<article>{body}</article>
-            <footer><a href="{source_url}">View Markdown source</a><span>Built from the repository's documentation.</span></footer>
+        <nav id="documentation-nav" class="sidebar" aria-label="Documentation">{links}<a class="sidebar-source" href="https://github.com/{html.escape(repository, quote=True)}">Astra on GitHub <span aria-hidden="true">↗</span></a></nav>
+        <main id="content" tabindex="-1"><div class="eyebrow">{group}</div><article>{body}</article>
+            <footer><a href="{source_url}">Edit this page <span aria-hidden="true">↗</span></a><span>Astra documentation</span></footer>
         </main>
+        {toc_html}
     </div>
+    <dialog class="search-dialog" aria-labelledby="search-title"><div class="search-heading"><h2 id="search-title">Search documentation</h2><button type="button" class="close-search" aria-label="Close search">Esc</button></div><label class="visually-hidden" for="search-input">Search pages and options</label><input id="search-input" type="search" placeholder="Search pages, options, and guides…" autocomplete="off"><p class="search-status" role="status" aria-live="polite"></p><ul class="search-results"></ul><p class="search-hint">Use Tab to choose a result. Escape closes search.</p></dialog>
 </body>
 </html>
 '''
         (output / pages[source.resolve()]).write_text(page, encoding="utf-8", newline="\n")
+    (output / "search-index.json").write_text(json.dumps(search_index, ensure_ascii=True, separators=(",", ":")), encoding="utf-8", newline="\n")
     checked = check_links(output)
     print(f"Built {len(documents)} Astra documentation pages; checked {checked} local links and anchors.")
 

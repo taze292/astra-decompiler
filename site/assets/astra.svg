@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none" role="img" aria-labelledby="title">
+  <title id="title">Astra</title>
+  <defs>
+    <linearGradient id="astra" x1="12" y1="56" x2="52" y2="8" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#69D5FF"/>
+      <stop offset=".52" stop-color="#A89AFF"/>
+      <stop offset="1" stop-color="#E5A7FF"/>
+    </linearGradient>
+  </defs>
+  <path d="M27.5 9h9L58 55H46.5l-4.1-9H21.6l-4.1 9H6L27.5 9Zm-1.6 27.5h12.2L32 22.7l-6.1 13.8Z" fill="url(#astra)"/>
+</svg>

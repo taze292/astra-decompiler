@@ -29,7 +29,7 @@ CLI syntax is `--key value`. Boolean switches also support `--no-key`; `--state-
 | `header` | `IncludeHeader` | true | Two-line generator/version and measured elapsed-time header |
 | `lines` | `IncludeLineComments` | true | Function line comments, including their lookup expressions |
 | `upvalues` | `IncludeUpvalueComments` | true | Capture comments with lowercase copy/ref kinds |
-| `compact-upvalues` | `CompactUpvalues` | false | One-line capture list; default is separate -- Upvalues / -- [1] Name (copy/ref) lines |
+| `compact-upvalues` | `CompactUpvalues` | false | One-line capture list; default is a block comment with an Upvalues heading and indexed copy/ref rows |
 | `upvalue-indexes` | `IncludeUpvalueIndexes` | true | Show 1-based capture indexes in either comment style |
 | `group-spacing` | `GroupSpacing` | true | Separate statement groups with blank lines |
 | `locators` | `IncludeFunctionLocators` | true | Master switch for both kinds of function lookup |
@@ -38,8 +38,8 @@ CLI syntax is `--key value`. Boolean switches also support `--no-key`; `--state-
 | `filter-line` | `FilterLineField` | `Line` | `Line` or `StartLine`; file/API only, bridge supplies detected metadata |
 | `module-path` | `ModulePath` | empty | Single-line ASCII Instance expression, ≤8,192 bytes; file/API only |
 | `optimization-passes` | `OptimizationPasses` | 5 | Maximum 0–8 simplification passes; stop earlier on convergence; 0 retains noisier lowering |
-| `state-machine` | `ForceStateMachine` | false | Force explicit program-counter control flow |
-| `fallback` | `AllowFallback` | true | Permit state-machine output when structuring cannot safely finish |
+| `state-machine` | `ForceStateMachine` | false | Force explicit program-counter control flow for diagnostics; requires AllowFallback=true |
+| `fallback` | `AllowFallback` | false | Opt in to state-machine output when structuring cannot safely finish |
 | `max-input-bytes` | `MaxInputBytes` | 67,108,864 | 1–268,435,456 bytes |
 | `max-output-bytes` | `MaxOutputBytes` | 67,108,864 | 1–268,435,456 bytes |
 | `max-analysis-cells` | `MaxAnalysisCells` | 16,000,000 | 1–64,000,000 instruction × register cells per function |
@@ -47,6 +47,8 @@ CLI syntax is `--key value`. Boolean switches also support `--no-key`; `--state-
 | `max-nesting` | `MaxNesting` | 128 | Maximum closure depth, 1–128; root is depth 0 |
 
 Unknown keys, invalid enums, partial numbers such as `2junk`, numeric overflow, and invalid Boolean text are errors. Boolean text must be `true` or `false`. Forced state machines with fallback disabled are rejected. `ValidateOptions` also validates settings constructed directly in C++.
+
+Astra 0.5 defaults to structured reconstruction with `AllowFallback=false` in both the bridge and C++ API. If structuring cannot finish safely, the request fails rather than inserting a dispatcher. State-machine output is an explicit diagnostic opt-in: enable `AllowFallback` first, then optionally `ForceStateMachine` to force that output. On the CLI, use `--fallback true --state-machine` for the forced form.
 
 The legacy `--no-filtergc` switch still disables **both** locator kinds for compatibility. Prefer `--no-gc-locators` to disable only GC comments, or `--no-locators` to disable both.
 
@@ -69,17 +71,19 @@ Implicit method receivers always use Luau's required spelling `self`, including 
 
 ## Comment rules
 
-Upvalues use valid line comments by default:
+Upvalues use a block comment by default:
 
 ```luau
--- Upvalues
--- [1] Uv1 (copy)
--- [2] Uv2 (ref)
+--[[
+    Upvalues
+    [1] Uv1 (copy)
+    [2] Uv2 (ref)
+]]--
 ```
 
 `CompactUpvalues=true` uses a one-line list. `IncludeUpvalueIndexes` controls bracketed numbering independently in both styles; `IncludeUpvalueComments=false` hides the entire list. For example, `{ CompactUpvalues = true, IncludeUpvalueIndexes = false }` produces a compact unnumbered list. Existing `AstraOptions` tables are preserved on reinstallation.
 
-`IncludeLineComments=false` suppresses the entire function line/lookup comment. `IncludeFunctionLocators=false` retains line numbers while hiding lookups. When `IncludeRequireLocators=true` and a reachable, unambiguous export is proven, that lookup takes priority. Otherwise GC is used if `IncludeGcLocators=true`. With GC disabled, unresolved functions have only their line number. No dangling separator is emitted.
+`IncludeLineComments=false` suppresses the entire function line/lookup comment. `IncludeFunctionLocators=false` retains line numbers while hiding lookups. When `IncludeRequireLocators=true`, a valid ModulePath is available, and a reachable, unambiguous export is proven, that lookup takes priority. Missing game paths or disabled require locators use GC instead if `IncludeGcLocators=true`. With GC disabled, unresolved functions have only their line number. No dangling separator is emitted.
 
 A function reconstructed through a retained compiler inline guard has only `-- Uninlined by Astra` as its own metadata comment. Its line, lookup, and upvalue annotations are suppressed regardless of these presentation options. This provenance marker remains with `IncludeLineComments=false` and `IncludeUpvalueComments=false`. Ordinary functions inside that body retain their own settings. See [INLINE_RECOVERY.md](INLINE_RECOVERY.md).
 
@@ -89,7 +93,7 @@ GC lookups use serialized function names, never generated binding names. If both
 
 ## Live bridge configuration
 
-Start the local server, then execute the **local** `tools/Decompile.luau` (bridge v7). The optional download loader follows the Astra repository's `main` branch after it is renamed and published. Installation and requests do not print or warn. The bridge follows [Volt's WebSocket API](https://docs.voltbz.net/docs/websocket), including binary-message flags and explicit closure of discarded clients.
+Start the local server, then execute the **local** `tools/Decompile.luau` (bridge v8). The optional download loader follows the Astra repository's `main` branch. Installation and requests do not print or warn. The bridge follows [Volt's WebSocket API](https://docs.voltbz.net/docs/websocket), including binary-message flags and explicit closure of discarded clients.
 
 ```luau
 getgenv().AstraConfig = {

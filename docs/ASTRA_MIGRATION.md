@@ -1,6 +1,6 @@
 # Move to Astra
 
-The decompiler is now called **Astra**. Rebuild from this checkout and install the current `tools/Decompile.luau` to use its readable options, array formatting, spacing controls, and updated comments. Older release executables and pinned loaders are historical artifacts; they do not acquire new behavior when the repository is renamed.
+The current release is **Astra 0.5**. Rebuild from this checkout and install the current `tools/Decompile.luau` (bridge v8) to use its readable options, array formatting, spacing controls, and updated comments. Older release executables and pinned loaders do not acquire new behavior automatically. For a first installation, use [getting started](GETTING_STARTED.md).
 
 ## Build and install
 
@@ -47,6 +47,10 @@ The CLI continues to use readable kebab-case flags, such as `--compact-arrays tr
 
 ## Output changes
 
+`AllowFallback` now defaults to `false`, matching the bridge and internal options. An unresolved structuring case returns an error instead of silently generating a state-machine dispatcher. Diagnostic fallback requires `AllowFallback=true`; forced state-machine output also requires that opt-in. See the [Astra 0.5 control-flow validation](OBFUSCATED_CONTROL_FLOW.md) for current reconstruction fixes.
+
+Reinstallation preserves an existing `AstraOptions` table. If an older installation left `AllowFallback=true` in that table, set it to `false` or remove that field to adopt the new default.
+
 The default header is:
 
 ```luau
@@ -54,12 +58,14 @@ The default header is:
 -- Time taken: 0.004497s
 ```
 
-Default upvalue annotations use valid Luau line comments, lowercase capture kinds, and independent indexes:
+Default upvalue annotations use a Luau block comment, lowercase capture kinds, and independent indexes:
 
 ```luau
--- Upvalues
--- [1] RunService (copy)
--- [2] Elapsed (ref)
+--[[
+    Upvalues
+    [1] RunService (copy)
+    [2] Elapsed (ref)
+]]--
 ```
 
 `IncludeUpvalueIndexes = false` removes the indexes; `CompactUpvalues = true` selects the compact presentation. Recovered compiler-inlined functions retain only their Astra uninlining provenance comment as their own annotation.
@@ -74,4 +80,4 @@ Formatting settings control indentation, blank lines between statement groups, a
 
 ## GitHub repository and Pages
 
-Rename the repository when ready, update the local remote, and choose **GitHub Actions** in **Settings → Pages**. The prepared workflow publishes documentation directly from the default branch. Follow [the Pages setup guide](GITHUB_PAGES.md) for exact commands and the expected URL.
+The repository is `taze292/astra-decompiler`. GitHub Actions publishes the Markdown documentation directly from the default branch to [the Astra docs](https://taze292.github.io/astra-decompiler/). For forks, local previews, and deployment troubleshooting, follow [the Pages guide](GITHUB_PAGES.md). No separate Pages branch is needed.

@@ -41,7 +41,7 @@ Independent-input batch parallelism remains available. Nested prototypes still s
 ./build/Release/astra-compile.exe examples/CaptureLifetimes.luau artifacts/captures.luac 1 0
 ./build/Release/astra.exe artifacts/captures.luac --no-header -o artifacts/captures.luau
 ./build/Release/astra-bench.exe artifacts/captures.luac 300
-./tools/ValidateCorpus.ps1 -OutputDirectory artifacts/readability/source-corpus
+./dev/tools/ValidateCorpus.ps1 -OutputDirectory artifacts/readability/source-corpus
 ```
 
-For live checks, start the newly built server, install local `tools/Decompile.luau`, then execute `tools/TestReadability.luau` and `tools/TestCameraModule.luau`. They store results in `getgenv().AstraReadabilityValidation` and `getgenv().AstraRewriteValidation` without printing. The former discovers the two Projectile modules when present, CameraModule, ControlModule, Data, and up to three LocalScripts under the local player's PlayerScripts (or StarterPlayerScripts when the runtime container is absent). It compiles recovered code without executing game modules and restores the user's configuration afterward.
+For live checks, start the newly built server, install local `tools/Decompile.luau`, then execute `dev/tools/TestReadability.luau` and `dev/tools/TestCameraModule.luau`. They store results in `getgenv().AstraReadabilityValidation` and `getgenv().AstraRewriteValidation` without printing. The former discovers the two Projectile modules when present, CameraModule, ControlModule, Data, and up to three LocalScripts under the local player's PlayerScripts (or StarterPlayerScripts when the runtime container is absent). It compiles recovered code without executing game modules and restores the user's configuration afterward.

@@ -42,7 +42,7 @@ These are observations on this machine/corpus, not universal speed guarantees. C
 
 ## Core latency
 
-`tools/BenchmarkCorpus.ps1` ran the baseline and rewritten binaries consecutively for each input with identical defaults.
+`dev/tools/BenchmarkCorpus.ps1` ran the baseline and rewritten binaries consecutively for each input with identical defaults.
 
 | Input | Bytes / functions | Baseline median | Rewrite median | Baseline p95 | Rewrite p95 | Median reduction |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -114,10 +114,10 @@ Final CameraModule validation on Roblox `0.743.0.7431129` returned 28,079 source
 
 ```powershell
 ./build.ps1 -Test
-./tools/BenchmarkCorpus.ps1 -Inputs @('artifacts/CameraModule.luac', 'artifacts/rewrite/CameraModule.live.luac', 'artifacts/RobloxFixture.luac', 'artifacts/rewrite/Corpus.luac') -BaselineDirectory artifacts/rewrite/baseline
-./tools/ValidateCorpus.ps1 -BaselineDirectory artifacts/rewrite/baseline -Samples 100
+./dev/tools/BenchmarkCorpus.ps1 -Inputs @('artifacts/CameraModule.luac', 'artifacts/rewrite/CameraModule.live.luac', 'artifacts/RobloxFixture.luac', 'artifacts/rewrite/Corpus.luac') -BaselineDirectory artifacts/rewrite/baseline
+./dev/tools/ValidateCorpus.ps1 -BaselineDirectory artifacts/rewrite/baseline -Samples 100
 ./build/Release/astra-batch-bench.exe artifacts/rewrite/CameraModule.live.luac
-./tools/MeasureMemory.ps1 -InputPath artifacts/rewrite/Corpus.luac -BaselineDirectory artifacts/rewrite/baseline
+./dev/tools/MeasureMemory.ps1 -InputPath artifacts/rewrite/Corpus.luac -BaselineDirectory artifacts/rewrite/baseline
 ```
 
 Artifacts are intentionally untracked. On a fresh checkout, compile your own fixture inputs, build the baseline benchmark revision in a separate directory, and pass those paths. To reproduce the generated corpus, create `local M = {}`, append functions `M.F1` through `M.F200` with body `local y = x * N; if y > 4 then y += 1 else y -= 1 end; return y`, and finish with `return M.F37(10), M.F123(2), M.F200(0)`. Compile at optimization 1/debug 2. Repeat samples on an otherwise idle machine when comparing small changes.

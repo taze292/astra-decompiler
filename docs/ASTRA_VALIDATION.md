@@ -57,7 +57,7 @@ Baseline: the pre-Astra working revision `a18b706`, with binaries preserved befo
 
 The new lexical formatting work has a small measured cost on CameraModule. This update does **not** claim a universal speedup. The finalizer limits retained tokens to table-constructor ranges, avoids unchanged padding edits, and returns unchanged source without rebuilding it. All three benchmark inputs retain zero fallback. Output differences from the baseline are intentional comment/array-format changes; the generated corpus body remains identical.
 
-Local logs and measurements are in ignored `artifacts/astra/`, including `build-test-final.log`, `crossover.csv`, `crossover-summary.csv`, and `source-corpus/`. Reproduce ordinary comparisons with `tools/BenchmarkCorpus.ps1`; run both variant orders when comparing small timing differences.
+Local logs and measurements are in ignored `artifacts/astra/`, including `build-test-final.log`, `crossover.csv`, `crossover-summary.csv`, and `source-corpus/`. Reproduce ordinary comparisons with `dev/tools/BenchmarkCorpus.ps1`; run both variant orders when comparing small timing differences.
 
 ## Documentation and release checks
 
