@@ -47,10 +47,13 @@ unsigned Exports::Record(const Prototype &P, const ControlFlow &Flow, unsigned P
 {
     unsigned FrameId = unsigned(Frames.size());
     Frames.push_back({Proto, Parameters, {}});
+    std::vector<unsigned> Returns;
+    for (unsigned J = 0; J < P.Instructions.size(); ++J)
+        if (P.Instructions[J].Op == LOP_RETURN) Returns.push_back(J);
     auto Certain = [&](unsigned Index)
     {
-        for (unsigned J = 0; J < P.Instructions.size(); ++J)
-            if (P.Instructions[J].Op == LOP_RETURN && !Flow.Dominates(Index, J))
+        for (unsigned J : Returns)
+            if (!Flow.Dominates(Index, J))
                 return false;
         return true;
     };

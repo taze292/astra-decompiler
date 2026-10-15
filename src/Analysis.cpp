@@ -3,7 +3,7 @@
 namespace Taze::Detail
 {
 Function::Function(Engine &Owner, unsigned Proto, std::vector<Upvalue> Captures, unsigned Nesting)
-    : E(Owner), P(E.C.Prototypes.at(Proto)), Flow(P, E.Settings.MaxAnalysisCells), Id(Proto), Depth(Nesting), Upvalues(std::move(Captures))
+    : E(Owner), P(E.C.Prototypes.at(Proto)), Flow(P, E.Settings.MaxAnalysisCells, E.Analysis), Id(Proto), Depth(Nesting), Upvalues(std::move(Captures))
 {
     if (Depth > E.Settings.MaxNesting)
         throw Error("Function nesting exceeds configured limit");
@@ -79,6 +79,7 @@ void Function::BuildDataflow()
     const unsigned Count = unsigned(P.Instructions.size());
     if (std::uint64_t(Count) * P.Stack > E.Settings.MaxAnalysisCells)
         throw Error("Function dataflow exceeds analysis limit");
+    E.Analysis.Spend(std::size_t(Count) * P.Stack * 3);
     std::vector<unsigned> Parent;
     auto New = [&]()
     {

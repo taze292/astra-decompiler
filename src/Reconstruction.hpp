@@ -143,6 +143,7 @@ class Engine
   public:
     const Chunk &C;
     const Options &Settings;
+    AnalysisBudget Analysis;
     Result Output;
     std::vector<Symbol> Symbols;
     std::set<std::string> Names;

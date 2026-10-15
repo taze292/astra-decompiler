@@ -3,7 +3,7 @@
 
 namespace Taze::Detail
 {
-Engine::Engine(const Chunk &Bytecode, const Options &Options) : C(Bytecode), Settings(Options)
+Engine::Engine(const Chunk &Bytecode, const Options &Options) : C(Bytecode), Settings(Options), Analysis{Options.MaxAnalysisWork}
 {
     // A generated local must never shadow an original global, even when PascalCase changes a debug name.
     for (const auto &P : C.Prototypes)

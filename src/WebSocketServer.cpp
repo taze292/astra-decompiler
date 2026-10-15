@@ -240,7 +240,8 @@ std::string Process(std::string_view Request, const Options &Settings)
                 }
                 // Remote requests may lower the host's resource caps, never raise them.
                 if (RequestSettings.MaxInputBytes > Settings.MaxInputBytes || RequestSettings.MaxOutputBytes > Settings.MaxOutputBytes ||
-                    RequestSettings.MaxAnalysisCells > Settings.MaxAnalysisCells || RequestSettings.MaxNesting > Settings.MaxNesting)
+                    RequestSettings.MaxAnalysisCells > Settings.MaxAnalysisCells || RequestSettings.MaxNesting > Settings.MaxNesting ||
+                    RequestSettings.MaxAnalysisWork > Settings.MaxAnalysisWork)
                     throw Error("Request options exceed server resource limits");
             }
         }

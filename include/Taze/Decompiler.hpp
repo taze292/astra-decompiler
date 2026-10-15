@@ -39,6 +39,7 @@ struct Options
     unsigned OptimizationPasses = 5;
     unsigned MaxNesting = 128;
     std::size_t MaxAnalysisCells = 16000000;
+    std::size_t MaxAnalysisWork = 32000000;
     std::string FilterLineField = "Line";
     std::string ModulePath;
     std::size_t MaxInputBytes = 64 * 1024 * 1024;
@@ -53,6 +54,7 @@ struct Statistics
     std::size_t InputBytes = 0;
     std::size_t InstructionCount = 0;
     std::size_t SymbolCount = 0;
+    std::size_t AnalysisWork = 0;
 };
 
 struct Result

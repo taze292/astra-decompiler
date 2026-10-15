@@ -5,6 +5,15 @@
 
 namespace Taze
 {
+struct AnalysisBudget
+{
+    std::size_t Remaining;
+    void Spend(std::size_t Amount = 1)
+    {
+        if (Amount > Remaining) throw Error("Analysis exceeds configured work limit");
+        Remaining -= Amount;
+    }
+};
 // Instruction indices are graph nodes; the final node is the common function exit.
 struct ControlFlow
 {
@@ -12,8 +21,9 @@ struct ControlFlow
     std::vector<int> Dominators, PostDominators;
     std::vector<std::bitset<256>> LiveIn;
     std::vector<unsigned> Blocks;
+    std::vector<unsigned> DomEnter, DomExit;
 
-    explicit ControlFlow(const Prototype &Proto, std::size_t MaxCells);
+    explicit ControlFlow(const Prototype &Proto, std::size_t MaxCells, AnalysisBudget &Budget);
     bool Dominates(unsigned Header, unsigned Node) const;
 };
 

@@ -20,6 +20,7 @@ std::vector<Statement> Function::Region(unsigned Start, unsigned End, int BreakT
     unsigned Pos = Index(Start), Limit = Index(End);
     while (Pos != Limit && Pos < P.Instructions.size())
     {
+        E.Analysis.Spend();
         if (RegionVisits.empty())
             RegionVisits.resize(P.Instructions.size());
         if (++RegionVisits[Pos] > 12)
@@ -29,10 +30,10 @@ std::vector<Statement> Function::Region(unsigned Start, unsigned End, int BreakT
         if (!IgnoreBackedge)
         {
             int Back = -1;
-            for (unsigned J = Pos + 1; J < Limit; ++J)
-                if (P.Instructions[J].Target() == int(I.Pc) && Flow.Dominates(Pos, J) &&
+            for (unsigned J : Flow.Predecessors[Pos])
+                if (J > Pos && J < Limit && P.Instructions[J].Target() == int(I.Pc) && Flow.Dominates(Pos, J) &&
                     (Jump(P.Instructions[J].Op) || Conditional(P.Instructions[J].Op)))
-                    Back = int(J);
+                    Back = std::max(Back, int(J));
             if (Back >= 0)
             {
                 const auto &Tail = P.Instructions[unsigned(Back)];

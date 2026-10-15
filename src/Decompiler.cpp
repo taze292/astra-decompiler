@@ -33,6 +33,7 @@ Result Decompile(std::string_view Bytecode, const Options &Settings)
     E.Output.Stats.FinalizationMilliseconds = std::chrono::duration<double, std::milli>(Finished - Reconstructed).count();
     E.Output.Stats.InputBytes = Bytecode.size();
     E.Output.Stats.SymbolCount = E.Symbols.size();
+    E.Output.Stats.AnalysisWork = Settings.MaxAnalysisWork - E.Analysis.Remaining;
     for (const auto &P : C.Prototypes)
         E.Output.Stats.InstructionCount += P.Instructions.size();
     return std::move(E.Output);

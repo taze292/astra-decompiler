@@ -123,6 +123,8 @@ return answer, text, count, x, y, recurse(5), string.upper("literal")
         Reject([&] { Taze::Disassemble(Bytes, S); });
         S = {}; S.MaxAnalysisCells = 1;
         Reject([&] { Taze::Decompile(Bytes, S); });
+        S = {}; S.MaxAnalysisWork = 1;
+        Reject([&] { Taze::Decompile(Bytes, S); });
         S = {}; S.ForceStateMachine = true; S.AllowFallback = false;
         Reject([&] { Taze::Decompile(Bytes, S); });
         auto Result = Taze::Decompile(Bytes);

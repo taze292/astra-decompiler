@@ -61,6 +61,7 @@ void ApplyOption(Options &S, std::string_view Key, std::string_view Value)
     else if (Key == "optimization-passes") S.OptimizationPasses = Integer(Value);
     else if (Key == "max-nesting") S.MaxNesting = Integer(Value);
     else if (Key == "max-analysis-cells") S.MaxAnalysisCells = Integer(Value);
+    else if (Key == "max-analysis-work") S.MaxAnalysisWork = Integer(Value);
     else if (Key == "max-input-bytes") S.MaxInputBytes = Integer(Value);
     else if (Key == "max-output-bytes") S.MaxOutputBytes = Integer(Value);
     else if (Key == "filter-line") S.FilterLineField = Value;
@@ -84,6 +85,7 @@ void ValidateOptions(const Options &S)
     if (S.OptimizationPasses > 8) throw Error("Optimization passes must be between 0 and 8");
     if (S.MaxNesting < 1 || S.MaxNesting > 128) throw Error("Max nesting must be between 1 and 128");
     if (S.MaxAnalysisCells < 1 || S.MaxAnalysisCells > 64000000) throw Error("Max analysis cells must be between 1 and 64000000");
+    if (S.MaxAnalysisWork < 1 || S.MaxAnalysisWork > 256000000) throw Error("Max analysis work must be between 1 and 256000000");
     constexpr std::size_t MaxBytes = 256 * 1024 * 1024;
     if (!S.MaxInputBytes || S.MaxInputBytes > MaxBytes || !S.MaxOutputBytes || S.MaxOutputBytes > MaxBytes)
         throw Error("Input/output limits must be between 1 byte and 256 MiB");

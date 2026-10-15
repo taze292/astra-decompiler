@@ -57,6 +57,7 @@ int main(int Argc, char **Argv)
                              "  --max-input-bytes N          Input cap (1..268435456)\n"
                              "  --max-output-bytes N         Source cap (1..268435456)\n"
                              "  --max-analysis-cells N       Per-function analysis cap (1..64000000)\n"
+                             "  --max-analysis-work N        Per-request graph/dataflow work cap\n"
                              "  --max-nesting N              Closure nesting cap (1..128)\n"
                              "  --stats                      Print stage timings and counts to stderr\n"
                              "  --batch --output-dir DIR      Decompile multiple files in input order\n"
@@ -85,7 +86,11 @@ int main(int Argc, char **Argv)
             else if (Arg == "--no-filtergc")
                 Settings.IncludeFunctionLocators = false;
             else if (Arg == "--state-machine")
-                Settings.ForceStateMachine = true;
+            {
+                if (I + 1 < Argc && (std::string_view(Argv[I + 1]) == "true" || std::string_view(Argv[I + 1]) == "false"))
+                    Taze::ApplyOption(Settings, "state-machine", Value());
+                else Settings.ForceStateMachine = true;
+            }
             else if (Arg == "--port")
             {
                 auto Text = Value();
@@ -97,7 +102,7 @@ int main(int Argc, char **Argv)
             }
             else if (Arg.starts_with("--no-"))
             {
-                static const std::set<std::string> Flags = {"header", "lines", "upvalues", "locators", "gc-locators", "require-locators", "type-names", "preserve-function-names", "fallback"};
+                static const std::set<std::string> Flags = {"header", "lines", "upvalues", "locators", "gc-locators", "require-locators", "type-names", "preserve-function-names", "fallback", "state-machine"};
                 auto Key = Arg.substr(5);
                 if (!Flags.count(Key)) throw Taze::Error("Unknown flag " + Arg);
                 Taze::ApplyOption(Settings, Key, "false");
@@ -120,8 +125,8 @@ int main(int Argc, char **Argv)
         if (!Inputs.empty()) Input = Inputs.front();
         if (Server)
         {
-            if (!Input.empty() || !Output.empty() || Assembly)
-                throw Taze::Error("--serve cannot be combined with file input/output or --disassemble");
+            if (!Input.empty() || !Output.empty() || Assembly || Stats)
+                throw Taze::Error("--serve cannot be combined with file input/output, --disassemble, or --stats");
             return Taze::ServeWebSocket(Port, Settings);
         }
         if (Input.empty())
@@ -143,6 +148,7 @@ int main(int Argc, char **Argv)
                           << " reconstruct_ms=" << Result.Stats.ReconstructionMilliseconds
                           << " finalize_ms=" << Result.Stats.FinalizationMilliseconds
                           << " instructions=" << Result.Stats.InstructionCount << " symbols=" << Result.Stats.SymbolCount
+                          << " analysis_work=" << Result.Stats.AnalysisWork
                           << " fallbacks=" << Result.StateMachineFunctions << '\n';
             Source = std::move(Result.Source);
             for (const auto &Diagnostic : Result.Diagnostics)

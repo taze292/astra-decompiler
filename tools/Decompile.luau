@@ -9,7 +9,7 @@ if type(MaxPending) ~= "number" or MaxPending % 1 ~= 0 or MaxPending < 1 or MaxP
     return nil
 end
 local GetBytecode = getscriptbytecode or Environment.getscriptbytecode
-if type(GetBytecode) ~= "function" or type(DefaultTimeout) ~= "number" or DefaultTimeout <= 0 or DefaultTimeout >= math.huge then
+if type(GetBytecode) ~= "function" or type(DefaultTimeout) ~= "number" or DefaultTimeout ~= DefaultTimeout or DefaultTimeout <= 0 or DefaultTimeout >= math.huge then
     return nil
 end
 
@@ -293,7 +293,7 @@ local function Decompile(Target, Timeout, Overrides)
         Overrides, Timeout = Timeout, nil
     end
     Timeout = Timeout or DefaultTimeout
-    if type(Timeout) ~= "number" or Timeout <= 0 or Timeout >= math.huge then
+    if type(Timeout) ~= "number" or Timeout ~= Timeout or Timeout <= 0 or Timeout >= math.huge then
         return nil, "Timeout must be a positive finite number"
     end
     local Options, EncodedOptions = RequestOptions(Overrides)

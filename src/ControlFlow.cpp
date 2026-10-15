@@ -118,7 +118,7 @@ std::vector<unsigned> Reads(const Instruction &I, const Prototype &P)
 namespace
 {
 std::vector<int> ImmediateDominators(const std::vector<std::vector<unsigned>> &Edges, const std::vector<std::vector<unsigned>> &Reverse,
-                                     unsigned Root)
+                                     unsigned Root, AnalysisBudget &Budget)
 {
     std::vector<bool> Seen(Edges.size());
     std::vector<unsigned> Order;
@@ -126,6 +126,7 @@ std::vector<int> ImmediateDominators(const std::vector<std::vector<unsigned>> &E
     Seen[Root] = true;
     while (!Stack.empty())
     {
+        Budget.Spend();
         auto &[Node, Next] = Stack.back();
         if (Next == Edges[Node].size())
         {
@@ -150,10 +151,17 @@ std::vector<int> ImmediateDominators(const std::vector<std::vector<unsigned>> &E
     {
         while (A != B)
         {
+            Budget.Spend();
             while (Rank[A] > Rank[B])
+            {
+                Budget.Spend();
                 A = unsigned(Parent[A]);
+            }
             while (Rank[B] > Rank[A])
+            {
+                Budget.Spend();
                 B = unsigned(Parent[B]);
+            }
         }
         return A;
     };
@@ -163,6 +171,7 @@ std::vector<int> ImmediateDominators(const std::vector<std::vector<unsigned>> &E
         Changed = false;
         for (unsigned Node : Order)
         {
+            Budget.Spend(1 + Reverse[Node].size());
             if (Node == Root)
                 continue;
             int Common = -1;
@@ -180,11 +189,12 @@ std::vector<int> ImmediateDominators(const std::vector<std::vector<unsigned>> &E
 }
 } // namespace
 
-ControlFlow::ControlFlow(const Prototype &P, std::size_t MaxCells)
+ControlFlow::ControlFlow(const Prototype &P, std::size_t MaxCells, AnalysisBudget &Budget)
 {
     unsigned Count = unsigned(P.Instructions.size());
     if (std::uint64_t(Count) * std::max(1u, P.Stack) > MaxCells)
         throw Error("Function control-flow exceeds analysis limit");
+    Budget.Spend(Count);
     Successors.resize(Count + 1);
     Predecessors.resize(Count + 1);
     std::vector<bool> Leader(Count + 1);
@@ -220,8 +230,39 @@ ControlFlow::ControlFlow(const Prototype &P, std::size_t MaxCells)
             ++Block;
         Blocks.push_back(Block);
     }
-    Dominators = ImmediateDominators(Successors, Predecessors, 0);
-    PostDominators = ImmediateDominators(Predecessors, Successors, Count);
+    Dominators = ImmediateDominators(Successors, Predecessors, 0, Budget);
+    PostDominators = ImmediateDominators(Predecessors, Successors, Count, Budget);
+
+    // DFS intervals make repeated dominance queries constant time, including
+    // disconnected nodes (each unreachable node is its own tree root).
+    std::vector<std::vector<unsigned>> Children(Count + 1);
+    for (unsigned Node = 0; Node <= Count; ++Node)
+        if (Dominators[Node] >= 0 && unsigned(Dominators[Node]) != Node)
+            Children[unsigned(Dominators[Node])].push_back(Node);
+    DomEnter.resize(Count + 1);
+    DomExit.resize(Count + 1);
+    unsigned Clock = 0;
+    for (unsigned Root = 0; Root <= Count; ++Root)
+    {
+        if (Dominators[Root] >= 0 && unsigned(Dominators[Root]) != Root) continue;
+        std::vector<std::pair<unsigned, unsigned>> Stack{{Root, 0}};
+        DomEnter[Root] = Clock++;
+        while (!Stack.empty())
+        {
+            auto &[Node, Next] = Stack.back();
+            if (Next == Children[Node].size())
+            {
+                DomExit[Node] = Clock;
+                Stack.pop_back();
+            }
+            else
+            {
+                auto Child = Children[Node][Next++];
+                DomEnter[Child] = Clock++;
+                Stack.emplace_back(Child, 0);
+            }
+        }
+    }
 
     LiveIn.resize(Count + 1);
     std::vector<std::bitset<256>> Uses(Count), Definitions(Count);
@@ -239,6 +280,7 @@ ControlFlow::ControlFlow(const Prototype &P, std::size_t MaxCells)
     {
         auto J = Queue.front();
         Queue.pop();
+        Budget.Spend(1 + Successors[J].size() + Predecessors[J].size());
         Queued[J] = false;
         std::bitset<256> Out;
         for (auto Next : Successors[J])
@@ -258,8 +300,6 @@ ControlFlow::ControlFlow(const Prototype &P, std::size_t MaxCells)
 
 bool ControlFlow::Dominates(unsigned Header, unsigned Node) const
 {
-    while (Node != Header && Dominators[Node] >= 0 && unsigned(Dominators[Node]) != Node)
-        Node = unsigned(Dominators[Node]);
-    return Node == Header;
+    return DomEnter[Header] <= DomEnter[Node] && DomEnter[Node] < DomExit[Header];
 }
 } // namespace Taze
