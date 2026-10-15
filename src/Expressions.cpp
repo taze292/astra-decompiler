@@ -265,12 +265,20 @@ std::string CleanCondition(std::string Text)
     Text = Unwrap(CleanExpression(Text));
     if (Text.starts_with("not "))
     {
-        auto Operand = Text.substr(4);
-        if (!PrefixExpression(Operand) && !(Operand.starts_with('(') && Closing(Operand, 0) == Operand.size() - 1) &&
-            !Operand.starts_with("not "))
+        auto WholeNegation = [](const std::string &Value)
+        {
+            std::size_t Start = 0;
+            while (Value.compare(Start, 4, "not ") == 0)
+                Start += 4;
+            if (!Start)
+                return false;
+            auto Operand = Value.substr(Start);
+            return PrefixExpression(Operand) || (Operand.starts_with('(') && Closing(Operand, 0) == Operand.size() - 1);
+        };
+        if (!WholeNegation(Text))
             return Text;
         auto Inner = Unwrap(Text.substr(4));
-        if (Inner.starts_with("not "))
+        if (WholeNegation(Inner))
             return CleanCondition(Inner.substr(4));
         // Equality negation is safe for metamethods and NaN; ordering negation is not.
         unsigned Depth = 0;

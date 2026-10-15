@@ -1,8 +1,14 @@
 #include "ControlFlowCases.hpp"
 #include "Luau/BytecodeBuilder.h"
 #include "Luau/Compiler.h"
+#include "NumericCoercionCases.hpp"
 #include "OptimizerCases.hpp"
+#include "PredicateDagCases.hpp"
+#include "ScopeCases.hpp"
+#include "StatementSyntaxCases.hpp"
 #include "Taze/Decompiler.hpp"
+#include "ThreadedLoopCases.hpp"
+#include "UniversalStructureCases.hpp"
 #include "lua.h"
 #include "lualib.h"
 
@@ -575,8 +581,14 @@ return n,values()
 
     for (auto &[Name, Source] : ControlFlowCases())
         Result.push_back({std::move(Name), std::move(Source)});
+    for (auto &[Name, Source] : UniversalStructureCases())
+        Result.push_back({std::move(Name), std::move(Source)});
     for (auto [Name, Source] : OptimizerCases)
         Result.push_back({Name, Source});
+    for (auto [Name, Source] : StatementSyntaxCases)
+        Result.push_back({Name, Source});
+    for (auto &[Name, Source] : ScopeCases())
+        Result.push_back({std::move(Name), std::move(Source)});
 
     // Deterministic generated cases combine loop-carried phi values, tables,
     // early exits and several CFG shapes. Constants vary without relying on
@@ -861,7 +873,7 @@ int main(int Argc, char **Argv)
 {
     unsigned Cases = 0, Failures = 0, SourceFallbacks = 0, RawFallbacks = 0;
     const std::string Filter = Argc > 1 ? Argv[1] : "";
-    const std::map<std::string, std::string> RawExpected = {
+    std::map<std::string, std::string> RawExpected = {
         {"bytecode_open_mutable_return_prefix", "3:1:1;3:1:7;0:;3:1:9;"},
         {"bytecode_open_mutable_argument", "3:1:1;3:1:7;0:;3:1:9;"},
         {"bytecode_open_mutable_callee", "3:1:9;3:1:7;3:1:8;"},
@@ -872,6 +884,21 @@ int main(int Argc, char **Argv)
         {"bytecode_loop_capture_without_close", "3:1:3;3:1:3;3:1:3;"},
     };
     auto Corpus = Fixtures();
+    for (auto &Fixture : ThreadedLoopCases())
+    {
+        RawExpected.emplace(Fixture.Name, Fixture.Expected);
+        Corpus.push_back({Fixture.Name, Fixture.Bytes, true});
+    }
+    for (auto &Fixture : NumericCoercionCases())
+    {
+        RawExpected.emplace(Fixture.Name, Fixture.Expected);
+        Corpus.push_back({Fixture.Name, Fixture.Bytes, true});
+    }
+    for (auto &Fixture : PredicateDagCases())
+    {
+        RawExpected.emplace(Fixture.Name, Fixture.Expected);
+        Corpus.push_back({Fixture.Name, Fixture.Bytes, true});
+    }
     for (auto &Fixture : BytecodeFixtures())
         Corpus.push_back(std::move(Fixture));
     for (const auto &Fixture : Corpus)
@@ -914,8 +941,11 @@ int main(int Argc, char **Argv)
                         if (!Options.ForceStateMachine)
                             (Fixture.Serialized ? RawFallbacks : SourceFallbacks) += unsigned(Result.StateMachineFunctions);
                         if (!Options.ForceStateMachine &&
-                            (Fixture.Name.starts_with("long_") || Fixture.Name == "loader_closed_captures_then_reused_loop_registers" ||
-                             Fixture.Name == "bytecode_closed_capture_reused_by_loop"))
+                            (Fixture.Name.starts_with("long_") || Fixture.Name.starts_with("universal_") ||
+                             Fixture.Name == "loader_closed_captures_then_reused_loop_registers" ||
+                             Fixture.Name == "bytecode_closed_capture_reused_by_loop" || Fixture.Name.starts_with("bytecode_threaded_") ||
+                             Fixture.Name.starts_with("bytecode_predicate_dag_") ||
+                             Fixture.Name == "bytecode_compound_conditional_latches"))
                             Check(Result.StateMachineFunctions == 0, "A regular boolean chain required state-machine fallback");
                         if (!Options.ForceStateMachine && Fixture.Name == "loader_shared_counter_callbacks")
                             Check(Source.find("[1] }") == std::string::npos, "Shared outer counter retained a reference box");

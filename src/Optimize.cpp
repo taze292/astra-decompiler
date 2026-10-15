@@ -18,6 +18,12 @@ bool Function::Optimize(std::vector<Statement> &Nodes)
         {
             Structure(S.Body);
             Structure(S.Else);
+            if ((S.Type == Kind::While || S.Type == Kind::For || S.Type == Kind::Repeat) && !S.Body.empty() &&
+                S.Body.back().Type == Kind::Continue)
+            {
+                S.Body.pop_back();
+                Changed = true;
+            }
             if (S.Type == Kind::While && S.Text == "true" && !S.Body.empty())
             {
                 const auto &Guard = S.Body.front();
@@ -93,7 +99,7 @@ bool Function::Optimize(std::vector<Statement> &Nodes)
                 {
                     auto &Previous = List[N - 1];
                     Previous.Text =
-                        "(" + Unwrap(Previous.Text) + ")" + (Test == Token(U) ? " and " : " or ") + "(" + Unwrap(S.Body[0].Text) + ")";
+                        "((" + Unwrap(Previous.Text) + ")" + (Test == Token(U) ? " and " : " or ") + "(" + Unwrap(S.Body[0].Text) + "))";
                     Previous.Pure = false;
                     Previous.Call = false;
                     Changed = true;
@@ -265,8 +271,9 @@ bool Function::Optimize(std::vector<Statement> &Nodes)
                                 auto Replacement = S.Text;
                                 auto Position = Nodes[J].Text.find(Token(Id)) + Token(Id).size();
                                 if (Position < Nodes[J].Text.size() &&
-                                    std::string(".:[").find(Nodes[J].Text[Position]) != std::string::npos &&
-                                    !PrefixExpression(Replacement) && (Replacement.empty() || Replacement.front() != '('))
+                                    std::string(".:[(").find(Nodes[J].Text[Position]) != std::string::npos &&
+                                    !PrefixExpression(Replacement) &&
+                                    !(Replacement.starts_with('(') && Closing(Replacement, 0) == Replacement.size() - 1))
                                     Replacement = "(" + Replacement + ")";
                                 Replace(Nodes[J].Text, Token(Id), Replacement);
                                 Changed = true;
@@ -378,8 +385,9 @@ bool Function::Optimize(std::vector<Statement> &Nodes)
                         if (S.Call)
                             Replacement = "(" + Replacement + ")";
                         auto Position = Next.Text.find(Token(Id)) + Token(Id).size();
-                        if (Position < Next.Text.size() && std::string(".:[").find(Next.Text[Position]) != std::string::npos &&
-                            !PrefixExpression(Replacement) && (Replacement.empty() || Replacement.front() != '('))
+                        if (Position < Next.Text.size() && std::string(".:[(").find(Next.Text[Position]) != std::string::npos &&
+                            !PrefixExpression(Replacement) &&
+                            !(Replacement.starts_with('(') && Closing(Replacement, 0) == Replacement.size() - 1))
                             Replacement = "(" + Replacement + ")";
                         Replace(Next.Text, Token(Id), Replacement);
                         Next.Pure = Next.Pure && S.Pure;

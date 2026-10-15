@@ -46,6 +46,7 @@ enum class Kind
     For,
     Break,
     Continue,
+    Scope,
     Function
 };
 struct Statement
@@ -116,6 +117,13 @@ class Function
     std::string OpenHint;
     std::map<unsigned, std::string> Hints;
     std::vector<unsigned> RegionVisits;
+    std::vector<unsigned> NaturalLoopEnds, LoopRegionEnds;
+    void FindLoopRegions();
+    unsigned LoopTail(const Instruction &I) const;
+    unsigned JumpDestination(unsigned Pc) const;
+    bool EquivalentExit(unsigned Left, unsigned Right) const;
+    unsigned LoopContinuation(unsigned Head, unsigned Tail, unsigned Limit, std::vector<Statement> &Before);
+    bool PredicateRegion(unsigned Pos, unsigned Limit, unsigned &LastTest, unsigned &Fallthrough, int &Target, std::string &Test);
     std::map<const std::vector<Statement> *, std::set<unsigned>> ScopedDeclarations;
     void BuildDataflow();
     void CountDefinitions();
@@ -132,7 +140,7 @@ class Function
     std::string Condition(const Instruction &I) const;
     std::vector<Statement> Region(unsigned Start, unsigned End, int BreakTarget = -1, int ContinueTarget = -1, unsigned Level = 0,
                                   bool IgnoreBackedge = false);
-    std::vector<Statement> StateMachine();
+    std::vector<Statement> StateMachine(std::string_view Reason);
     std::string Closure(const Instruction &I, std::vector<Statement> &Out);
     unsigned Index(unsigned Pc) const;
     int OpenBaseAt(unsigned Pc) const;

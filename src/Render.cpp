@@ -54,8 +54,8 @@ std::string Function::Render(const std::vector<Statement> &Nodes, unsigned Inden
     for (std::size_t N = 0; N < Nodes.size(); ++N)
     {
         const auto &S = Nodes[N];
-        bool Block = S.Type == Kind::If || S.Type == Kind::While || S.Type == Kind::Repeat || S.Type == Kind::For ||
-                     S.Type == Kind::Function || S.Text.find("function(") != std::string::npos;
+        bool Block = S.Type == Kind::Scope || S.Type == Kind::If || S.Type == Kind::While || S.Type == Kind::Repeat ||
+                     S.Type == Kind::For || S.Type == Kind::Function || S.Text.find("function(") != std::string::npos;
         Group Current = Group::Calls;
         std::string Receiver;
         if (Block)
@@ -148,7 +148,10 @@ std::string Function::Render(const std::vector<Statement> &Nodes, unsigned Inden
         case Kind::While:
         case Kind::Repeat:
         case Kind::For:
+        case Kind::Scope:
         {
+            if (S.Type == Kind::Scope)
+                Line("do");
             if (S.Type == Kind::If)
             {
                 auto Test = FormatCondition(S.Text);
@@ -192,6 +195,8 @@ std::string Function::Render(const std::vector<Statement> &Nodes, unsigned Inden
         default:
             throw Error("Internal: unsupported source statement");
         }
+        if (S.Type == Kind::Return || S.Type == Kind::Break || S.Type == Kind::Continue)
+            break;
         Previous = Current;
         PreviousReceiver = Receiver;
         if ((Block || Current == Group::Table) && N + 1 < Nodes.size())
@@ -208,6 +213,7 @@ std::string Function::Generate(bool Main)
     {
         if (E.Settings.ForceStateMachine)
             throw Unstructured("requested by caller");
+        FindLoopRegions();
         Nodes = Region(0, unsigned(P.Code.size()));
     }
     catch (const Unstructured &Reason)
@@ -216,7 +222,7 @@ std::string Function::Generate(bool Main)
             throw Error("Function " + std::to_string(Id) + ": structuring failed (" + Reason.what() + ")");
         E.Output.Diagnostics.push_back("Function " + std::to_string(Id) + ": state machine (" + Reason.what() + ")");
         E.Output.StateMachineFunctions++;
-        Nodes = StateMachine();
+        Nodes = StateMachine(Reason.what());
     }
     if (!NeedsDynamicTop)
     {
@@ -235,6 +241,83 @@ std::string Function::Generate(bool Main)
     for (unsigned Pass = 0; Pass < E.Settings.OptimizationPasses; ++Pass)
         if (!Optimize(Nodes))
             break;
+    // Shared-tail reconstruction can leave duplicate terminators. Luau requires
+    // return/break/continue to finish their lexical statement list, so discard
+    // unreachable suffixes even when optimizer passes are disabled.
+    unsigned DeclarationCount =
+        unsigned(Parameters.size() + Cells.size()) + unsigned(NeedsPack) + unsigned(NeedsPack && NeedsDynamicTop) + unsigned(NeedsVarargs);
+    std::function<void(std::vector<Statement> &)> PruneUnreachable = [&](auto &List)
+    {
+        for (std::size_t N = 0; N < List.size(); ++N)
+        {
+            auto &S = List[N];
+            DeclarationCount += unsigned(S.Left.size());
+            PruneUnreachable(S.Body);
+            PruneUnreachable(S.Else);
+            if (S.Type == Kind::Return || S.Type == Kind::Break || S.Type == Kind::Continue)
+            {
+                List.resize(N + 1);
+                break;
+            }
+        }
+    };
+    PruneUnreachable(Nodes);
+    const bool LimitLocalPressure = Dispatch || DeclarationCount >= 96;
+    // Reaching definitions can merge dead stores from several branches. Their
+    // write count exceeds one, so expression optimization intentionally keeps
+    // them; nevertheless a pure RHS with no observed destination is removable.
+    // Resolve transitively with a worklist rather than leaving hundreds of
+    // unused phi locals active in a large parser or generated data function.
+    if (LimitLocalPressure)
+    {
+        std::unordered_map<unsigned, unsigned> SourceReads;
+        std::unordered_map<unsigned, std::vector<Statement *>> PureDefinitions;
+        std::queue<Statement *> DeadCandidates;
+        std::function<void(std::vector<Statement> &)> CountSourceReads = [&](auto &List)
+        {
+            for (auto &S : List)
+            {
+                for (auto U : Tokens(S.Text))
+                    ++SourceReads[U];
+                if (S.Type == Kind::Assign && S.Pure && !S.Left.empty())
+                {
+                    DeadCandidates.push(&S);
+                    for (auto U : S.Left)
+                        PureDefinitions[U].push_back(&S);
+                }
+                CountSourceReads(S.Body);
+                CountSourceReads(S.Else);
+            }
+        };
+        CountSourceReads(Nodes);
+        std::set<const Statement *> DeadStores;
+        while (!DeadCandidates.empty())
+        {
+            auto *S = DeadCandidates.front();
+            DeadCandidates.pop();
+            if (DeadStores.count(S) || std::any_of(S->Left.begin(), S->Left.end(), [&](auto U) { return SourceReads[U] != 0; }))
+                continue;
+            DeadStores.insert(S);
+            E.Analysis.Spend();
+            for (auto U : Tokens(S->Text))
+                if (--SourceReads[U] == 0)
+                    for (auto *Definition : PureDefinitions[U])
+                        DeadCandidates.push(Definition);
+        }
+        if (!DeadStores.empty())
+        {
+            std::function<void(std::vector<Statement> &)> RemoveDeadStores = [&](auto &List)
+            {
+                for (auto &S : List)
+                {
+                    RemoveDeadStores(S.Body);
+                    RemoveDeadStores(S.Else);
+                }
+                std::erase_if(List, [&](const auto &S) { return DeadStores.count(&S) != 0; });
+            };
+            RemoveDeadStores(Nodes);
+        }
+    }
     // Remove the compiler's implicit empty return at the end of a chunk/function.
     if (!Nodes.empty() && Nodes.back().Type == Kind::Return && Nodes.back().Text.empty())
         Nodes.pop_back();
@@ -271,6 +354,203 @@ std::string Function::Generate(bool Main)
         Path.pop_back();
     };
     Inspect(Nodes);
+
+    // Bytecode reuses registers after a value's last use, but unrelated SSA
+    // values were previously rendered as locals lasting until function exit.
+    // Large data modules can therefore exhaust Luau's 200-local limit despite
+    // having only a handful of live bytecode registers. Restore lexical scopes
+    // before declaration placement, so captured values remain ordinary locals
+    // and no register-file table or renaming/reuse changes their identity.
+    if (LimitLocalPressure)
+    {
+        std::map<Scope, std::set<unsigned>> ScopeLocals;
+        unsigned Permanent =
+            unsigned(Parameters.size()) + unsigned(NeedsPack) + unsigned(NeedsPack && NeedsDynamicTop) + unsigned(NeedsVarargs);
+        for (auto U : Referenced)
+        {
+            const auto &Symbol = E.Symbols[U];
+            if (Symbol.Owner != Id || Symbol.Parameter || U == PackSymbol || U == TopSymbol || U == VarargsSymbol)
+                continue;
+            if (Symbol.Cell)
+                ++Permanent; // Reference-cell allocation is intentionally function-wide.
+            else
+                ScopeLocals[Occurrences[U].back()].insert(U);
+        }
+        bool ScopedLifetimes = false;
+        std::function<void(std::vector<Statement> &, unsigned)> ScopeLifetimes = [&](auto &List, unsigned Inherited)
+        {
+            if (List.empty())
+                return;
+            const auto &Locals = ScopeLocals[&List];
+            unsigned Pressure = Inherited + unsigned(Locals.size());
+            // Analyze children before moving their containing statements, since the
+            // occurrence map refers to the original statement-vector addresses.
+            for (auto &S : List)
+            {
+                ScopeLifetimes(S.Body, Pressure + (S.Type == Kind::For ? unsigned(S.Left.size()) : 0));
+                ScopeLifetimes(S.Else, Pressure);
+            }
+            if (Pressure <= 128 || Locals.empty() || List.size() < 2)
+                return;
+            struct Lifetime
+            {
+                std::size_t First, Last;
+            };
+            std::map<unsigned, Lifetime> Lifetimes;
+            std::function<void(const Statement &, std::size_t)> InspectLifetime = [&](const auto &S, std::size_t Position)
+            {
+                auto Use = [&](unsigned U)
+                {
+                    if (!Locals.count(U))
+                        return;
+                    auto [It, New] = Lifetimes.emplace(U, Lifetime{Position, Position});
+                    if (!New)
+                        It->second.Last = Position;
+                };
+                for (auto U : Tokens(S.Text))
+                    Use(U);
+                for (auto U : S.Left)
+                    Use(U);
+                for (const auto &Child : S.Body)
+                    InspectLifetime(Child, Position);
+                for (const auto &Child : S.Else)
+                    InspectLifetime(Child, Position);
+            };
+            for (std::size_t N = 0; N < List.size(); ++N)
+                InspectLifetime(List[N], N);
+            std::vector<std::size_t> End(List.size());
+            std::iota(End.begin(), End.end(), 0);
+            std::vector<bool> Starts(List.size());
+            for (const auto &[U, Life] : Lifetimes)
+            {
+                End[Life.First] = std::max(End[Life.First], Life.Last);
+                Starts[Life.First] = true;
+            }
+            // Close an interval over every local introduced inside it. No local
+            // declaration can escape its new scope. Right-to-left memoization skips
+            // already closed intervals rather than repeatedly scanning long chains.
+            for (std::size_t N = List.size(); N-- > 0;)
+                for (std::size_t J = N + 1; J <= End[N];)
+                {
+                    E.Analysis.Spend();
+                    End[N] = std::max(End[N], End[J]);
+                    J = End[J] + 1;
+                }
+            std::function<std::vector<Statement>(std::size_t, std::size_t, unsigned)> Partition =
+                [&](std::size_t Begin, std::size_t Limit, unsigned Nesting)
+            {
+                std::vector<Statement> Result;
+                Result.reserve(std::min<std::size_t>(Limit - Begin, 128));
+                for (std::size_t N = Begin; N < Limit;)
+                {
+                    E.Analysis.Spend();
+                    if (Starts[N] && End[N] + 1 < Limit && Nesting < 32)
+                    {
+                        Statement ScopeNode{Kind::Scope};
+                        ScopeNode.Body = Partition(N, End[N] + 1, Nesting + 1);
+                        Result.push_back(std::move(ScopeNode));
+                        ScopedLifetimes = true;
+                        N = End[N] + 1;
+                    }
+                    else
+                        Result.push_back(std::move(List[N++]));
+                }
+                return Result;
+            };
+            List = Partition(0, List.size(), 0);
+            // Moving statements also changes descendant vector addresses even
+            // when partitioning emits no additional lexical scope.
+            ScopedLifetimes = true;
+        };
+        ScopeLifetimes(Nodes, Permanent);
+        if (ScopedLifetimes)
+        {
+            // The new vectors are real lexical scopes. Recompute declaration LCAs
+            // after every move, before retaining any vector address for rendering.
+            Occurrences.clear();
+            Referenced.clear();
+            Inspect(Nodes);
+        }
+        // Crossing SSA lifetimes need not share one lexical scope. A long chain
+        // such as a = initial; b = step(a); c = step(b) otherwise closes into a
+        // single interval containing every temporary. Partition bounded statement
+        // chunks and let declaration LCAs export only the values crossing their
+        // boundaries. Repeating this builds a shallow scope hierarchy for very
+        // large chains without changing evaluation order or captured identities.
+        for (unsigned Round = 0; Round < 8; ++Round)
+        {
+            ScopeLocals.clear();
+            for (auto U : Referenced)
+            {
+                const auto &Symbol = E.Symbols[U];
+                if (Symbol.Owner == Id && !Symbol.Parameter && !Symbol.Cell && U != PackSymbol && U != TopSymbol && U != VarargsSymbol)
+                    ScopeLocals[Occurrences[U].back()].insert(U);
+            }
+            bool Partitioned = false;
+            std::function<void(std::vector<Statement> &, unsigned)> PartitionPressure = [&](auto &List, unsigned Inherited)
+            {
+                if (List.empty())
+                    return;
+                const auto &Locals = ScopeLocals[&List];
+                unsigned Pressure = Inherited + unsigned(Locals.size());
+                for (auto &S : List)
+                {
+                    PartitionPressure(S.Body, Pressure + (S.Type == Kind::For ? unsigned(S.Left.size()) : 0));
+                    PartitionPressure(S.Else, Pressure);
+                }
+                if (Pressure <= 128 || Locals.size() < 32 || List.size() < 2)
+                    return;
+                const std::size_t ChunkSize = std::min<std::size_t>(32, (List.size() + 1) / 2);
+                std::map<unsigned, std::size_t> FirstChunk;
+                std::set<unsigned> Exported;
+                std::function<void(const Statement &, std::size_t)> InspectChunk = [&](const auto &S, std::size_t Chunk)
+                {
+                    auto Use = [&](unsigned U)
+                    {
+                        if (!Locals.count(U))
+                            return;
+                        auto [It, New] = FirstChunk.emplace(U, Chunk);
+                        if (!New && It->second != Chunk)
+                            Exported.insert(U);
+                    };
+                    for (auto U : Tokens(S.Text))
+                        Use(U);
+                    for (auto U : S.Left)
+                        Use(U);
+                    for (const auto &Child : S.Body)
+                        InspectChunk(Child, Chunk);
+                    for (const auto &Child : S.Else)
+                        InspectChunk(Child, Chunk);
+                };
+                for (std::size_t N = 0; N < List.size(); ++N)
+                {
+                    E.Analysis.Spend();
+                    InspectChunk(List[N], N / ChunkSize);
+                }
+                if (Exported.size() == Locals.size())
+                    return;
+                std::vector<Statement> Result;
+                Result.reserve((List.size() + ChunkSize - 1) / ChunkSize);
+                for (std::size_t N = 0; N < List.size();)
+                {
+                    Statement Chunk{Kind::Scope};
+                    const auto End = std::min(N + ChunkSize, List.size());
+                    Chunk.Body.reserve(End - N);
+                    while (N < End)
+                        Chunk.Body.push_back(std::move(List[N++]));
+                    Result.push_back(std::move(Chunk));
+                }
+                List = std::move(Result);
+                Partitioned = true;
+            };
+            PartitionPressure(Nodes, Permanent);
+            if (!Partitioned)
+                break;
+            Occurrences.clear();
+            Referenced.clear();
+            Inspect(Nodes);
+        }
+    }
     std::function<bool(const Statement &, unsigned)> Contains = [&](const auto &S, unsigned U)
     {
         if (S.Text.find(Token(U)) != std::string::npos || std::find(S.Left.begin(), S.Left.end(), U) != S.Left.end())

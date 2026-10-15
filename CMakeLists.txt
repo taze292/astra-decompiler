@@ -16,7 +16,7 @@ endif()
 add_library(TazeDecompiler
     src/Bytecode.cpp src/ControlFlow.cpp src/Exports.cpp src/Decompiler.cpp src/Options.cpp src/Batch.cpp
     src/Expressions.cpp src/Symbols.cpp src/Analysis.cpp src/Lowering.cpp
-    src/Structure.cpp src/Optimize.cpp src/Render.cpp)
+    src/Structure.cpp src/Predicates.cpp src/Optimize.cpp src/Render.cpp)
 target_include_directories(TazeDecompiler PUBLIC include PRIVATE "${TAZE_LUAU_DIR}/Common/include")
 if(MSVC)
     target_compile_options(TazeDecompiler PRIVATE /W4 /EHsc)
