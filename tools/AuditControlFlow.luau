@@ -20,15 +20,22 @@ if type(getscripts) == "function" then
     for _, Target in getscripts() do Add(Target) end
 end
 table.sort(Targets, function(A, B) return A:GetFullName() < B:GetFullName() end)
-local Report = { Running = true, Total = #Targets, Tested = 0, Compiled = 0, Fallbacks = 0, Cases = {}, Errors = {} }
+local Report = { Running = true, Total = #Targets, Tested = 0, Compiled = 0, Fallbacks = 0, EmptySources = 0, Cases = {}, Errors = {}, Retries = {} }
 Environment.TazeControlFlowAudit = Report
 Environment.TazeControlFlowAuditTargets = Targets
 for Index, Target in Targets do
     if Report.Cancelled then break end
     local Path = Target:GetFullName()
     local Ok, Source = pcall(Bridge.Decompile, Target, 90, Options)
+    local Failure = if Ok then Bridge.LastError or tostring(Source) else tostring(Source)
+    if not (Ok and type(Source) == "string") and
+        (Failure:find("disconnected", 1, true) or Failure:find("send failed", 1, true) or Failure:find("connection failed", 1, true)) then
+        table.insert(Report.Retries, { Index = Index, Path = Path, Error = Failure })
+        Ok, Source = pcall(Bridge.Decompile, Target, 90, Options)
+    end
     Report.Tested += 1
-    if Ok and type(Source) == "string" and #Source > 0 then
+    if Ok and type(Source) == "string" then
+        if #Source == 0 then Report.EmptySources += 1 end
         local Compiled, Error = loadstring(Source, "TazeFlowAudit")
         local Reasons = {}
         for Line in Source:gmatch("[^\n]+") do

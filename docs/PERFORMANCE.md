@@ -2,7 +2,7 @@
 
 ## Whole-game reconstruction follow-up — 2026-10-15
 
-Against `bcf0d4a`, a representative nonlinear predicate case now avoids fallback and decompiles about **2.4 times as fast**. Four alternating-order 300-sample runs also measured small-input regressions: 3.3% on captured CameraModule, 0.7% on the 201-function corpus, 7.2% on the capture fixture, and 6.1% on a linear condition fixture. Additional correctness analysis is not free. The full results, live coverage, and interrupted final MCP sweep are documented in [UNIVERSAL_CONTROL_FLOW.md](UNIVERSAL_CONTROL_FLOW.md); older entries below describe previous milestones.
+Against `bcf0d4a`, a representative nonlinear predicate case now avoids fallback and decompiles about **2.4 times as fast**. Four alternating-order 300-sample runs also measured small-input regressions: 3.3% on captured CameraModule, 0.7% on the 201-function corpus, 7.2% on the capture fixture, and 6.1% on a linear condition fixture. Additional correctness analysis is not free. The full results and completed zero-fallback live sweep are documented in [UNIVERSAL_CONTROL_FLOW.md](UNIVERSAL_CONTROL_FLOW.md); older entries below describe previous milestones.
 
 ## ClientLoader lifetime correction — 2026-10-15
 
