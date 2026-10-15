@@ -84,7 +84,8 @@ void Decode(Chunk &C, OpcodeEncoding Encoding)
     {
         auto &P = C.Prototypes[Id];
         P.Instructions.clear();
-        P.PcToInstruction.clear();
+        P.PcToInstruction.assign(P.Code.size(), -1);
+        P.Instructions.reserve(P.Code.size());
         auto K = [&](unsigned Index) -> const Constant &
         {
             if (Index >= P.Constants.size())
@@ -328,20 +329,19 @@ void Decode(Chunk &C, OpcodeEncoding Encoding)
             default:
                 break;
             }
-            P.PcToInstruction.emplace(Pc, unsigned(P.Instructions.size()));
-            P.Instructions.push_back(I);
-            Pc = I.Next;
+            P.PcToInstruction[Pc] = int(P.Instructions.size());
+            P.Instructions.push_back(std::move(I));
+            Pc = P.Instructions.back().Next;
         }
         for (const auto &I : P.Instructions)
         {
             auto Target = I.Target();
-            if (Target != -1 && (Target < 0 || !P.PcToInstruction.count(unsigned(Target))))
+            if (Target != -1 && (Target < 0 || P.AtPc(unsigned(Target)) < 0))
                 throw Error("Jump target is outside code or inside AUX/CAPTURE words at PC " + std::to_string(I.Pc));
             if (Luau::isFastCall(I.Op))
             {
-                auto Call = P.PcToInstruction.find(I.Pc + I.C + 1);
-                if (Call == P.PcToInstruction.end() ||
-                    (P.Instructions[Call->second].Op != LOP_CALL && P.Instructions[Call->second].Op != LOP_CALLFB))
+                auto Call = P.AtPc(I.Pc + I.C + 1);
+                if (Call < 0 || (P.Instructions[Call].Op != LOP_CALL && P.Instructions[Call].Op != LOP_CALLFB))
                     throw Error("FASTCALL has no matching fallback CALL");
             }
         }

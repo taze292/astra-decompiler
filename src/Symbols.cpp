@@ -1,4 +1,5 @@
 #include "Reconstruction.hpp"
+#include <charconv>
 
 namespace Taze::Detail
 {
@@ -51,23 +52,22 @@ bool Engine::AnalyzeExports() const
 std::string Engine::Resolve(std::string Text)
 {
     auto Paths = AnalyzeExports() ? ExportGraph.Find(MainExportFrame) : std::map<unsigned, std::string>{};
+    std::map<unsigned, std::string> Lookups;
     for (const auto &[Proto, Fallback] : Locators)
     {
         auto It = Paths.find(Proto);
         auto Lookup = It == Paths.end() ? (Settings.IncludeGcLocators ? Fallback : "") : "require(" + Settings.ModulePath + ")" + It->second;
-        if (Lookup.empty())
-        {
-            Replace(Text, " | \x1d" + std::to_string(Proto) + "\x1c", "");
-            continue;
-        }
-        Replace(Text, "\x1d" + std::to_string(Proto) + "\x1c", Lookup);
+        Lookups[Proto] = Lookup.empty() ? "" : " | " + Lookup;
     }
     auto References = Tokens(Text);
     std::map<unsigned, std::vector<unsigned>> ByOwner;
-    std::set<unsigned> Seen;
+    std::vector<bool> Seen(Symbols.size());
     for (auto Id : References)
-        if (Seen.insert(Id).second)
+        if (!Seen.at(Id))
+        {
+            Seen[Id] = true;
             ByOwner[Symbols[Id].Owner].push_back(Id);
+        }
     std::map<unsigned, std::set<std::string>> Used;
     std::set<unsigned> Ready;
     std::function<void(unsigned)> Allocate = [&](unsigned Owner)
@@ -110,9 +110,34 @@ std::string Engine::Resolve(std::string Text)
     };
     for (auto &[Owner, Ids] : ByOwner)
         Allocate(Owner);
-    for (auto Id : Tokens(Text))
-        Replace(Text, Token(Id), Symbols.at(Id).Name);
-    return Text;
+    // Expand each placeholder once. Never scan or shift the full source per symbol.
+    std::string Output;
+    Output.reserve(std::min(Text.size(), Settings.MaxOutputBytes));
+    auto Append = [&](std::string_view Part)
+    {
+        if (Part.size() > Settings.MaxOutputBytes - Output.size())
+            throw Error("Generated source exceeds output limit");
+        Output.append(Part);
+    };
+    for (std::size_t Pos = 0; Pos < Text.size();)
+    {
+        auto Next = Text.find_first_of("\x1f\x1d", Pos);
+        if (Next == std::string::npos)
+        {
+            Append(std::string_view(Text).substr(Pos));
+            break;
+        }
+        Append(std::string_view(Text).substr(Pos, Next - Pos));
+        bool Symbol = Text[Next] == '\x1f';
+        auto End = Text.find(Symbol ? '\x1e' : '\x1c', Next + 1);
+        if (End == std::string::npos) throw Error("Internal: unterminated output token");
+        unsigned Id = 0;
+        auto [Last, Status] = std::from_chars(Text.data() + Next + 1, Text.data() + End, Id);
+        if (Status != std::errc{} || Last != Text.data() + End) throw Error("Internal: invalid output token");
+        Append(Symbol ? Symbols.at(Id).Name : Lookups.at(Id));
+        Pos = End + 1;
+    }
+    return Output;
 }
 void Engine::Budget(std::size_t Amount)
 {

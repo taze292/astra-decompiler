@@ -53,7 +53,9 @@ struct Prototype
     std::vector<Local> Locals;
     std::vector<std::string> UpvalueNames;
     std::vector<Instruction> Instructions;
-    std::map<unsigned, unsigned> PcToInstruction;
+    // AUX and CAPTURE words have no executable instruction index.
+    std::vector<int> PcToInstruction;
+    int AtPc(unsigned Pc) const { return Pc < PcToInstruction.size() ? PcToInstruction[Pc] : -1; }
 };
 
 struct Chunk

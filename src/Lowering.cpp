@@ -29,10 +29,10 @@ unsigned Function::Index(unsigned Pc) const
 {
     if (Pc == P.Code.size())
         return unsigned(P.Instructions.size());
-    auto It = P.PcToInstruction.find(Pc);
-    if (It == P.PcToInstruction.end())
+    auto Instruction = P.AtPc(Pc);
+    if (Instruction < 0)
         throw Unstructured("invalid region boundary");
-    return It->second;
+    return unsigned(Instruction);
 }
 
 std::string Function::ConstantAt(unsigned Index, unsigned Recursion) const
@@ -246,7 +246,7 @@ std::string Function::Closure(const Instruction &I, std::vector<Statement> &Out)
     {
         Text += " -- Line: " + (E.C.Prototypes[Child].Line ? std::to_string(E.C.Prototypes[Child].Line) : "Unknown");
         if (E.Settings.IncludeFunctionLocators && (E.Settings.IncludeGcLocators || E.AnalyzeExports()))
-            Text += " | " + Nested.Locator();
+            Text += Nested.Locator();
     }
     Text += "\n" + Body + "end";
     if (!Self.empty() && SelfSymbol != SymbolAt(I.A, I.Pc, true))

@@ -201,7 +201,7 @@ ControlFlow::ControlFlow(const Prototype &P, std::size_t MaxCells)
                     I.Op == LOP_FORGPREP_NEXT || I.Op == LOP_FORGPREP_INEXT || (I.Op == LOP_LOADB && I.C);
         if (I.Target() >= 0)
         {
-            auto Target = P.PcToInstruction.at(unsigned(I.Target()));
+            auto Target = unsigned(P.AtPc(unsigned(I.Target())));
             Add(Target);
             Leader[Target] = true;
             Leader[J + 1] = true;

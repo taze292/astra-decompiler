@@ -1,4 +1,5 @@
 #include "Reconstruction.hpp"
+#include <charconv>
 
 namespace Taze::Detail
 {
@@ -89,7 +90,11 @@ std::vector<unsigned> Tokens(const std::string &Text)
         auto End = Text.find('\x1e', Pos);
         if (End == std::string::npos)
             throw Error("Internal: unterminated source symbol");
-        Out.push_back(unsigned(std::stoul(Text.substr(Pos + 1, End - Pos - 1))));
+        unsigned Id = 0;
+        auto [Last, Status] = std::from_chars(Text.data() + Pos + 1, Text.data() + End, Id);
+        if (Status != std::errc{} || Last != Text.data() + End)
+            throw Error("Internal: invalid source symbol");
+        Out.push_back(Id);
         Pos = End + 1;
     }
     return Out;

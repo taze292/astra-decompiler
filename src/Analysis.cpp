@@ -133,15 +133,7 @@ void Function::BuildDataflow()
         for (auto [R, D] : Definitions[J])
             State[R] = D;
         WriteSymbols[J] = State;
-        const auto &I = P.Instructions[J];
-        std::vector<unsigned> Successors;
-        if (I.Target() >= 0)
-            Successors.push_back(Index(unsigned(I.Target())));
-        bool Unconditional = I.Op == LOP_JUMP || I.Op == LOP_JUMPBACK || I.Op == LOP_JUMPX || I.Op == LOP_RETURN || I.Op == LOP_FORGPREP ||
-                             I.Op == LOP_FORGPREP_NEXT || I.Op == LOP_FORGPREP_INEXT || (I.Op == LOP_LOADB && I.C);
-        if (!Unconditional && J + 1 < Count)
-            Successors.push_back(J + 1);
-        for (unsigned Next : Successors)
+        for (unsigned Next : Flow.Successors[J])
         {
             if (Next >= Count)
                 continue;
@@ -157,7 +149,8 @@ void Function::BuildDataflow()
                         Union(ReadSymbols[Next][R], State[R]);
         }
     }
-    std::map<unsigned, unsigned> RootSymbol;
+    constexpr unsigned Missing = std::numeric_limits<unsigned>::max();
+    std::vector<unsigned> RootSymbol(Parent.size(), Missing);
     for (unsigned R = 0; R < P.Stack; ++R)
         if (R < P.Parameters || Cells.count(R))
             RootSymbol[Find(Initial[R])] = Registers[R];
@@ -165,21 +158,23 @@ void Function::BuildDataflow()
     for (unsigned J = 0; J < P.Locals.size(); ++J)
     {
         const auto &L = P.Locals[J];
-        auto It = P.PcToInstruction.lower_bound(L.Start);
-        if (It == P.PcToInstruction.end() || ReadSymbols[It->second].empty())
+        auto It = std::lower_bound(P.Instructions.begin(), P.Instructions.end(), L.Start,
+                                  [](const Instruction &I, unsigned Pc) { return I.Pc < Pc; });
+        if (It == P.Instructions.end())
             continue;
-        auto Root = Find(ReadSymbols[It->second][L.Register]);
-        if (!RootSymbol.count(Root))
+        auto Index = std::size_t(It - P.Instructions.begin());
+        if (ReadSymbols[Index].empty()) continue;
+        auto Root = Find(ReadSymbols[Index][L.Register]);
+        if (RootSymbol[Root] == Missing)
             RootSymbol[Root] = LocalSymbols[J];
     }
     auto Resolve = [&](unsigned Definition, unsigned R)
     {
         unsigned Root = Find(Definition);
-        auto It = RootSymbol.find(Root);
-        if (It != RootSymbol.end())
-            return It->second;
+        if (RootSymbol[Root] != Missing)
+            return RootSymbol[Root];
         unsigned S = E.New("Value" + std::to_string(R + 1), Id);
-        RootSymbol.emplace(Root, S);
+        RootSymbol[Root] = S;
         return S;
     };
     for (unsigned J = 0; J < Count; ++J)
@@ -196,6 +191,8 @@ void Function::BuildDataflow()
         }
     }
 
+    if (!E.Settings.UseTypeNames)
+        return;
     // Union possible types over all definitions, including loop/branch joins. Only
     // specialize anonymous names when every reaching definition agrees.
     std::map<unsigned, unsigned> Types;
