@@ -2,6 +2,8 @@
 
 Taze preserves an ordinary call when bytecode retains the call's generic fallback. It does not invent a call solely because an arithmetic sequence resembles a function body.
 
+Function bodies reconstructed through a retained `CMPPROTO` fallback use a single provenance comment: `-- Uninlined by Taze's Decompiler`. Their own line/GC/require annotations and upvalue lists are suppressed in both output modes and both upvalue styles. The marker remains when ordinary metadata comments are disabled. An ordinary nested function retains its own normal comment policy. A recovered top-level chunk places the marker in its body; the configurable file header remains separate. The state-machine fallback by itself is not classified as uninlining.
+
 ## Guarded runtime inlining
 
 Luau's `CMPPROTO` instruction compares a callable against a runtime prototype id. A match enters a specialized body; a mismatch jumps to an ordinary call. Taze reconstructs the generic fallback, avoiding dependence on runtime-specific prototype ids. This works in structured output and in the state-machine fallback.

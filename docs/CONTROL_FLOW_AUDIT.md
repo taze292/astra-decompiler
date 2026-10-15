@@ -2,6 +2,22 @@
 
 This audit follows `e91ccc2`. Changes stay in local commits; no publication or push is part of the work.
 
+## ClientLoader correction — 2026-10-15
+
+The follow-up starts at `ad2d5f6`. The user's attached ClientLoader output expanded into a whole-function `ProgramCounter` dispatcher. The live diagnostic identified `generic loop at 241: register 14 live after loop at 252`. This was a false escape: a reference capture in that physical register had already been closed in an earlier scope, but the function-wide capture mask treated a later `CLOSEUPVALS` as reading it again.
+
+Liveness now computes a forward may-be-open capture set, closing the relevant suffix at each `CLOSEUPVALS`. The existing loop safety proof still rejects genuinely observable loop state. Native capture analysis also stops at a close and permits a fresh definition before any detached read, allowing ordinary per-iteration locals. Repeated captures of an unchanged outer binding can share a native local; reinitialized loop registers without a close retain their shared box. Tests independently verify that the latter still returns the same final value through every closure.
+
+The same live ClientLoader now decompiles with **fallback disabled**, compiles in Roblox, and has **zero reference boxes or closing-box assignments** under the default native-capture policy. With headers, upvalue comments, and line comments disabled consistently, output dropped from **30,532 to 4,076 bytes** (86.7% smaller). With ordinary function/upvalue comments retained and only the header disabled, output is 5,604 bytes. Six tested variants compile, including no simplification, generic snake casing, boxed captures, and explicitly forced state machines. The forced option intentionally retains dispatch output.
+
+The final six CTest suites pass **12,230 checks**, including **2,550 differential configurations / 8,688 stress checks** and **235 inline-recovery checks**. New regressions cover closed captures followed by reused loop outputs, shared outer counters, a raw closed-register reuse stream, and a raw deliberately shared loop binding without a close. Nested recovered functions are checked for exactly one provenance marker and no ordinary upvalue annotations.
+
+In the connected client, **100/100 script outputs compiled**. Three functions still used conservative fallback in HudController, Shared.Mutations, and EventController.Events.Meowl; this follow-up does not claim all structuring cases are solved. A controlled loader/callback fixture also executed in Roblox before and after reconstruction with all seven scalar results equal. Live game modules and ClientLoader were compiled without being executed or required for this validation.
+
+The retained-guard recovery comment is now `-- Uninlined by Taze's Decompiler`; its body's normal line/lookup/upvalue metadata is suppressed. This is separate from ordinary control-flow fallback. See [INLINE_RECOVERY.md](INLINE_RECOVERY.md).
+
+A 200-sample comparison against saved `ad2d5f6` binaries measured median core times of 1.3133 → 1.2432 ms for a locally compiled reference based on the supplied source, 5.6502 → 5.1263 ms for captured CameraModule, and 9.3296 → 9.0998 ms for the 201-function corpus. The compiled reference is not the live game's original bytecode. Its output shrank from 6,249 to 5,445 bytes. Raw measurements, compiler configurations, build logs, and aggregate live reports are ignored under `artifacts/clientloader/`.
+
 ## Process and acceptance gates
 
 1. Preserve baseline binaries before changing reconstruction. Investigate fresh live examples and synthetic equivalents independently in structuring, optimization, and differential validation.
@@ -30,7 +46,7 @@ The retained generic call behind `CMPPROTO` is reconstructed in both output mode
 
 ## Validation and limits
 
-Final Release results on 2026-10-15: all six CTest suites passed, with **12,020 checks** in total:
+The initial audit's Release results on 2026-10-15: all six CTest suites passed, with **12,020 checks** in total:
 
 | Suite | Checks |
 | --- | ---: |

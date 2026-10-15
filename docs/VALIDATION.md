@@ -1,5 +1,9 @@
 # Validation record
 
+## ClientLoader lifetime correction — 2026-10-15
+
+All six suites pass **12,230 checks**, including **2,550 stress configurations** and **235 inline-recovery checks**. The actual ClientLoader compiles with fallback disabled and zero reference boxes; clean output shrank from 30,532 to 4,076 bytes. Another 100-script live pass compiled all outputs, and the controlled loader fixture executed equivalently in Roblox. Three unrelated function fallbacks remain in that pass. See [CONTROL_FLOW_AUDIT.md](CONTROL_FLOW_AUDIT.md) for the diagnosis, measurements, options, and limits.
+
 ## Current control-flow audit — 2026-10-15
 
 All six suites pass, totaling **12,020 checks**, including **2,502 differential stress configurations** and **211 guarded inline-call recovery checks**. The final live audit compiled **100/100 scripts**. See [CONTROL_FLOW_AUDIT.md](CONTROL_FLOW_AUDIT.md) for the current results, precise scope, and remaining limitations. The sections below retain historical validation records.

@@ -61,6 +61,8 @@ Upvalues use the original multiline `Upvalues:` block by default. `compact-upval
 
 `lines=false` suppresses the entire function line/lookup comment. `locators=false` retains line numbers while hiding lookups. When require lookups are enabled and a reachable, unambiguous export is proven, that lookup takes priority. Otherwise GC is used if enabled. With GC disabled, unresolved functions have only their line number. No dangling separator is emitted.
 
+A function reconstructed through a retained compiler inline guard has only `-- Uninlined by Taze's Decompiler` as its own metadata comment. Its line, lookup, and upvalue annotations are suppressed regardless of these presentation options. This provenance marker remains with `lines=false`/`upvalues=false`. Ordinary functions inside that body retain their own settings. See [INLINE_RECOVERY.md](INLINE_RECOVERY.md).
+
 Export analysis is skipped when its output is disabled. It never requires or executes a module. Static export paths can follow nested tables, numeric/quoted keys, directly returned functions, and recognizable constructors/metatables; conflicting writes/returns or unknown mutations prevent a claimed path.
 
 GC lookups use serialized function names, never generated binding names. If both name and line are present, those filters are sufficient for the emitted expression. Otherwise at most five representable constant-pool entries are included. Missing lines display `Unknown`; nil/NaN, table templates, and closure templates are excluded from constants. Lookups depend on executor support and a matching live closure; they are not uniqueness proofs.

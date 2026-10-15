@@ -1,5 +1,9 @@
 # Rewrite measurements
 
+## ClientLoader lifetime correction — 2026-10-15
+
+The false fallback on live ClientLoader is fixed: clean output shrank **86.7%**, from 30,532 to 4,076 bytes, without reference boxes. A separate 200-sample core comparison against `ad2d5f6` measured **5.3%** lower median time for the locally compiled reference, **9.3%** for captured CameraModule, and **2.5%** for the 201-function corpus. These are distinct inputs; no live-bytecode core benchmark is claimed for ClientLoader. See [CONTROL_FLOW_AUDIT.md](CONTROL_FLOW_AUDIT.md) for full scope and artifacts.
+
 ## Current control-flow audit — 2026-10-15
 
 Against `e91ccc2`, the final 300-sample comparison reduced median decompilation time by **5.7%** on captured CameraModule, **5.1%** on the 201-prototype corpus, **4.7%** on the capture fixture, and **54.2%** on a long-condition fixture. The six source configurations are mixed, including roughly 3–4% regressions on two debug variants. Defaults now include numbered multiline upvalue comments. Full timings, output measurements, methodology, and limitations are in [CONTROL_FLOW_AUDIT.md](CONTROL_FLOW_AUDIT.md); older measurements below describe earlier revisions.
