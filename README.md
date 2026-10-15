@@ -102,7 +102,7 @@ Batch mode preserves input order, isolates file failures, rejects filename colli
 | Naming | inferred hints, debug names with fallbacks, generic names |
 | Anonymous names | type categories or uniform ValueN |
 | Function spelling | preserve original names or apply selected casing |
-| Comments | header, lines, captures, GC lookups, require lookups, all locators |
+| Comments | header, lines, multiline/compact captures, independent capture indexes, GC lookups, require lookups, all locators |
 | Reconstruction | simplification passes, forced state machine, fail instead of fallback |
 | Limits | input/output bytes, analysis cells/work, closure depth |
 
@@ -136,6 +136,8 @@ Malformed/unsupported inputs and invalid settings throw `Taze::Error`. Batch ite
 
 CTest covers compiler/VM round trips, configuration combinations, malformed/truncated inputs, deterministic mutation stress, concurrent batches, mock executor lifecycle, real WebSocket requests, and batch CLI errors. [VALIDATION.md](docs/VALIDATION.md) records results and historical checks; [PERFORMANCE.md](docs/PERFORMANCE.md) records baseline comparisons and reproduction steps.
 
+[CONTROL_FLOW_AUDIT.md](docs/CONTROL_FLOW_AUDIT.md) covers the latest control-flow and evaluation-order fixes, differential stress matrix, live audit, and remaining limits. [INLINE_RECOVERY.md](docs/INLINE_RECOVERY.md) explains recovery of compiler-inlined calls where explicit fallback bytecode survives.
+
 ```powershell
 ./build/Release/taze-bench.exe artifacts/CameraModule.luac 100
 ./build/Release/taze-batch-bench.exe artifacts/CameraModule.luac
@@ -151,7 +153,7 @@ The reader supports serialized versions **3–14**, type metadata 1–3, and the
 
 Reconstruction covers arithmetic, comparisons, imports, tables/members, short-circuit branches, methods, fixed/open tuples, varargs, closures, copy/reference captures, closing upvalues, recursion, numeric/generic loops, and fastcall fallback paths. Conservative dataflow and explicit capture snapshots preserve tested lifetimes and evaluation order.
 
-- Unsupported control flow uses a diagnosed `ProgramCounter` loop unless disabled. Its generalized-iteration coroutine adapter can change coroutine identity/yielding context.
+- Unsupported control flow uses a diagnosed `ProgramCounter` loop unless disabled. Canonical generic loops retain native iteration within that dispatcher. Noncanonical generalized loops may require a diagnosed coroutine adapter that changes coroutine identity/yielding context; ordinary function iterators are called directly.
 - Experimental classes, runtime-patched `NATIVECALL`, nonzero fourth vector components, and unknown future formats are rejected.
 - Debug-stack inspection, closure identity, environment manipulation, and undefined iteration/table-length behavior are not promised to match.
 - Original comments, formatting, types, and stripped names cannot be recovered exactly. Integer/vector output requires the corresponding runtime libraries.

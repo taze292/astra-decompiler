@@ -1,5 +1,9 @@
 # Rewrite measurements
 
+## Current control-flow audit — 2026-10-15
+
+Against `e91ccc2`, the final 300-sample comparison reduced median decompilation time by **5.7%** on captured CameraModule, **5.1%** on the 201-prototype corpus, **4.7%** on the capture fixture, and **54.2%** on a long-condition fixture. The six source configurations are mixed, including roughly 3–4% regressions on two debug variants. Defaults now include numbered multiline upvalue comments. Full timings, output measurements, methodology, and limitations are in [CONTROL_FLOW_AUDIT.md](CONTROL_FLOW_AUDIT.md); older measurements below describe earlier revisions.
+
 ## Readability follow-up — 2026-10-15
 
 Baseline: the completed 0.3.0 rewrite at `4d94587`, preserved under `artifacts/readability/baseline/`. Same Windows/ClangCL machine as below, five warmups and 300 samples per input. Current benchmark comparisons omit the timed header; the older baseline includes its fixed 54–55-byte header. This small harness difference is disclosed rather than treating timings as exact causal attribution. Source changes are intentional in this follow-up.

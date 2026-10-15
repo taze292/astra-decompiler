@@ -1,5 +1,9 @@
 # Validation record
 
+## Current control-flow audit — 2026-10-15
+
+All six suites pass, totaling **12,020 checks**, including **2,502 differential stress configurations** and **211 guarded inline-call recovery checks**. The final live audit compiled **100/100 scripts**. See [CONTROL_FLOW_AUDIT.md](CONTROL_FLOW_AUDIT.md) for the current results, precise scope, and remaining limitations. The sections below retain historical validation records.
+
 ## Current readability/configuration follow-up — 2026-10-15
 
 - All four CTest suites pass: 1,601 core checks, 1,642 pipeline checks, 40 WebSocket checks, and 7 batch CLI checks.
