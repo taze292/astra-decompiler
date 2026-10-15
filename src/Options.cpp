@@ -88,6 +88,8 @@ void ApplyOption(Options &S, std::string_view Key, std::string_view Value)
         S.InferCallNames = Boolean(Value);
     else if (Key == "compact-upvalues")
         S.CompactUpvalues = Boolean(Value);
+    else if (Key == "upvalue-indexes")
+        S.IncludeUpvalueIndexes = Boolean(Value);
     else if (Key == "group-spacing")
         S.GroupSpacing = Boolean(Value);
     else if (Key == "local-prefix")

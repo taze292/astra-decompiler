@@ -218,6 +218,20 @@ std::string Function::Generate(bool Main)
         E.Output.StateMachineFunctions++;
         Nodes = StateMachine();
     }
+    if (!NeedsDynamicTop)
+    {
+        const auto Assignment = Token(TopSymbol) + " = ";
+        std::function<void(std::vector<Statement> &)> RemoveTop = [&](auto &List)
+        {
+            std::erase_if(List, [&](const auto &S) { return S.Type == Kind::Raw && S.Text.starts_with(Assignment); });
+            for (auto &S : List)
+            {
+                RemoveTop(S.Body);
+                RemoveTop(S.Else);
+            }
+        };
+        RemoveTop(Nodes);
+    }
     for (unsigned Pass = 0; Pass < E.Settings.OptimizationPasses; ++Pass)
         if (!Optimize(Nodes))
             break;
@@ -304,8 +318,12 @@ std::string Function::Generate(bool Main)
     if (E.Settings.IncludeUpvalueComments && !Upvalues.empty() && E.Settings.CompactUpvalues)
     {
         std::vector<std::string> Names;
-        for (const auto &U : Upvalues)
-            Names.push_back((Tokens(U.Value).empty() ? U.Name : Token(Tokens(U.Value).front())) + (U.Reference ? " (ref)" : " (copy)"));
+        for (unsigned J = 0; J < Upvalues.size(); ++J)
+        {
+            const auto &U = Upvalues[J];
+            Names.push_back((E.Settings.IncludeUpvalueIndexes ? std::to_string(J + 1) + ": " : "") +
+                            (Tokens(U.Value).empty() ? U.Name : Token(Tokens(U.Value).front())) + (U.Reference ? " (ref)" : " (copy)"));
+        }
         Out += Pad + "-- Upvalues: " + Join(Names) + "\n";
         if (E.Settings.GroupSpacing)
             Out += '\n';
@@ -314,7 +332,7 @@ std::string Function::Generate(bool Main)
     {
         Out += Pad + "--[[\n" + Pad + std::string(E.Settings.IndentWidth, ' ') + "Upvalues:\n";
         for (unsigned J = 0; J < Upvalues.size(); ++J)
-            Out += Pad + std::string(E.Settings.IndentWidth, ' ') + std::to_string(J + 1) + ": " +
+            Out += Pad + std::string(E.Settings.IndentWidth, ' ') + (E.Settings.IncludeUpvalueIndexes ? std::to_string(J + 1) + ": " : "") +
                    (Tokens(Upvalues[J].Value).empty() ? Upvalues[J].Name : Token(Tokens(Upvalues[J].Value).front())) + " (type \"" +
                    (Upvalues[J].Reference ? "Reference" : "Copy") + "\")\n";
         Out += Pad + "]]\n\n";
@@ -348,7 +366,8 @@ std::string Function::Generate(bool Main)
     if (NeedsPack)
     {
         Out += Pad + "local " + Token(PackSymbol) + " = { n = 0 }\n";
-        Out += Pad + "local " + Token(TopSymbol) + " = 0\n";
+        if (NeedsDynamicTop)
+            Out += Pad + "local " + Token(TopSymbol) + " = 0\n";
         Declared.insert(PackSymbol);
         Declared.insert(TopSymbol);
     }

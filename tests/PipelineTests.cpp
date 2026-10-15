@@ -161,20 +161,26 @@ return answer, text, count, x, y, recurse(5), string.upper("literal"), callbacks
             auto Input = Luau::compile("local n=2; local function bump() n+=1 end; bump(); return n");
             for (bool Compact : {false, true})
                 for (bool Spacing : {false, true})
-                {
-                    Taze::Options O;
-                    O.CompactUpvalues = Compact;
-                    O.GroupSpacing = Spacing;
-                    O.InferCallNames = false;
-                    O.InferMemberNames = false;
-                    O.Naming = Taze::VariableNaming::Generic;
-                    O.LocalPrefix = "item";
-                    O.ArgumentPrefix = "arg";
-                    O.Casing = Taze::VariableCase::Preserve;
-                    auto Text = Taze::Decompile(Input, O).Source;
-                    Check(Execute(Luau::compile(Text)) == Execute(Input), "Formatting/naming changed capture behavior");
-                    Check((Text.find("-- Upvalues:") != std::string::npos) == Compact, "Capture comment style ignored");
-                }
+                    for (bool Indexes : {false, true})
+                    {
+                        Taze::Options O;
+                        O.CompactUpvalues = Compact;
+                        O.IncludeUpvalueIndexes = Indexes;
+                        O.GroupSpacing = Spacing;
+                        O.InferCallNames = false;
+                        O.InferMemberNames = false;
+                        O.Naming = Taze::VariableNaming::Generic;
+                        O.LocalPrefix = "item";
+                        O.ArgumentPrefix = "arg";
+                        O.Casing = Taze::VariableCase::Preserve;
+                        auto Text = Taze::Decompile(Input, O).Source;
+                        Check(Execute(Luau::compile(Text)) == Execute(Input), "Formatting/naming changed capture behavior");
+                        Check((Text.find("-- Upvalues:") != std::string::npos) == Compact, "Capture comment style ignored");
+                        Check((Text.find("1: ") != std::string::npos) == Indexes, "Capture indexes must be independent of comment style");
+                    }
+            Taze::Options Parsed;
+            Taze::ApplyOption(Parsed, "upvalue-indexes", "false");
+            Check(!Parsed.IncludeUpvalueIndexes && !Parsed.CompactUpvalues, "Upvalue option defaults/parser ignored");
             for (const char *Prefix : {"", "1bad", "bad.name", "bad-name", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"})
             {
                 Taze::Options O;

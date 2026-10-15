@@ -6,7 +6,7 @@ local Config = if type(Environment.TazeConfig) == "table" then Environment.TazeC
 Environment.TazeOptions = Environment.TazeOptions or {
     casing = "pascal", naming = "inferred", ["type-names"] = true,
     ["preserve-function-names"] = true, ["method-syntax"] = true, ["native-captures"] = true,
-    ["infer-members"] = true, ["infer-calls"] = true, ["compact-upvalues"] = true, ["group-spacing"] = true,
+    ["infer-members"] = true, ["infer-calls"] = true, ["compact-upvalues"] = false, ["upvalue-indexes"] = true, ["group-spacing"] = true,
     ["local-prefix"] = "Value", ["argument-prefix"] = "Argument",
     indent = 4, header = true, lines = true, upvalues = true,
     locators = true, ["require-locators"] = true, ["gc-locators"] = true,

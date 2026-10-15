@@ -58,7 +58,8 @@ int main(int Argc, char **Argv)
                              "  --no-infer-calls             Disable constructor/service/result hints\n"
                              "  --local-prefix NAME          Anonymous local prefix (default Value)\n"
                              "  --argument-prefix NAME       Parameter prefix (default Argument)\n"
-                             "  --no-compact-upvalues        Use expanded capture comments\n"
+                             "  --compact-upvalues true      Use one-line capture comments (default: multiline)\n"
+                             "  --no-upvalue-indexes         Hide capture indexes in either comment style\n"
                              "  --no-group-spacing           Omit statement-group blank lines\n"
                              "  --optimization-passes N      Simplification passes (0..8; default 5)\n"
                              "  --no-fallback                Fail if structured output is unavailable\n"
@@ -122,7 +123,8 @@ int main(int Argc, char **Argv)
                                                             "fallback",         "state-machine",
                                                             "method-syntax",    "native-captures",
                                                             "infer-members",    "infer-calls",
-                                                            "compact-upvalues", "group-spacing"};
+                                                            "compact-upvalues", "upvalue-indexes",
+                                                            "group-spacing"};
                 auto Key = Arg.substr(5);
                 if (!Flags.count(Key))
                     throw Taze::Error("Unknown flag " + Arg);

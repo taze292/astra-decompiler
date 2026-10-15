@@ -127,6 +127,9 @@ Function::Function(Engine &Owner, unsigned Proto, std::vector<Upvalue> Captures,
         LocalSymbols.push_back(Cells.count(L.Register) ? Registers[L.Register] : E.New(L.Name, Id, true, false, false, false, true));
     }
     PackSymbol = E.New("Results", Id, true);
+    // Open-result storage is reassigned by raw lowering statements. Treat it
+    // as mutable so a fixed-result snapshot cannot sink past the next call.
+    E.Symbols[PackSymbol].ReferenceAlias = true;
     TopSymbol = E.New("ResultBase", Id, true);
     VarargsSymbol = E.New("Arguments", Id, true);
     while (Upvalues.size() < P.Upvalues)

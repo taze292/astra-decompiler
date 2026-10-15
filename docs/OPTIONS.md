@@ -23,7 +23,8 @@ CLI syntax is `--key value`. Boolean switches also support `--no-key`; `--state-
 | `header` | `IncludeHeader` | true | Two-line generator/version and measured elapsed-time header |
 | `lines` | `IncludeLineComments` | true | Function line comments, including their lookup expressions |
 | `upvalues` | `IncludeUpvalueComments` | true | Copy/Reference capture comments |
-| `compact-upvalues` | `CompactUpvalues` | true | One-line capture list; false restores the numbered block |
+| `compact-upvalues` | `CompactUpvalues` | false | One-line capture list; default is the multiline block |
+| `upvalue-indexes` | `IncludeUpvalueIndexes` | true | Show 1-based capture indexes in either comment style |
 | `group-spacing` | `GroupSpacing` | true | Separate statement groups with blank lines |
 | `locators` | `IncludeFunctionLocators` | true | Master switch for both kinds of function lookup |
 | `gc-locators` | `IncludeGcLocators` | true | Allow `filtergc(...)` lookups |
@@ -55,6 +56,8 @@ Names are allocated after simplification, in deterministic first-reference order
 Implicit method receivers always use Luau's required spelling `self`, including in generic naming mode. Disable `method-syntax` to apply ordinary naming to explicit receivers. Method conversion is suppressed where it could shadow a captured outer receiver or a global `self`. Inference does not recover erased source names; it supplies hints from bytecode operations. For example, `Instance.new("Part")` suggests `Part`, event `Connect` suggests `Connection`, and raycasts suggest `RaycastResult`.
 
 ## Comment rules
+
+Upvalues use the original multiline `Upvalues:` block by default. `compact-upvalues=true` uses a one-line list. `upvalue-indexes` controls numbering independently in both styles; `upvalues=false` hides the entire list. For example, `{ ["compact-upvalues"] = true, ["upvalue-indexes"] = false }` produces a compact unnumbered list. Existing global `TazeOptions` tables are preserved on bridge reinstallation, so change their `compact-upvalues` value to false to adopt the new default in an existing session.
 
 `lines=false` suppresses the entire function line/lookup comment. `locators=false` retains line numbers while hiding lookups. When require lookups are enabled and a reachable, unambiguous export is proven, that lookup takes priority. Otherwise GC is used if enabled. With GC disabled, unresolved functions have only their line number. No dangling separator is emitted.
 

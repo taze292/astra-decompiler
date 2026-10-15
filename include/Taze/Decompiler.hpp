@@ -38,6 +38,7 @@ struct Options
     bool IncludeHeader = true;
     bool IncludeLineComments = true;
     bool IncludeUpvalueComments = true;
+    bool IncludeUpvalueIndexes = true;
     bool IncludeFunctionLocators = true;
     bool IncludeGcLocators = true;
     bool IncludeRequireLocators = true;
@@ -49,7 +50,7 @@ struct Options
     bool MethodSyntax = true;
     bool InferMemberNames = true;
     bool InferCallNames = true;
-    bool CompactUpvalues = true;
+    bool CompactUpvalues = false;
     bool GroupSpacing = true;
     std::string LocalPrefix = "Value";
     std::string ArgumentPrefix = "Argument";

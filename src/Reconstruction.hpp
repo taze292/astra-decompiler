@@ -106,7 +106,7 @@ class Function
     std::set<unsigned> ScalarReferences;
     std::vector<Statement> Prefix;
     unsigned PackSymbol, TopSymbol, VarargsSymbol;
-    bool NeedsPack = false, NeedsVarargs = false;
+    bool NeedsPack = false, NeedsVarargs = false, NeedsDynamicTop = false;
     bool Dispatch = false;
     std::string PendingMethod, PendingReceiver;
     unsigned PendingBase = 0;
@@ -134,6 +134,7 @@ class Function
     std::vector<Statement> StateMachine();
     std::string Closure(const Instruction &I, std::vector<Statement> &Out);
     unsigned Index(unsigned Pc) const;
+    int OpenBaseAt(unsigned Pc) const;
     bool Optimize(std::vector<Statement> &Nodes);
     std::string Render(const std::vector<Statement> &Nodes, unsigned Indent, std::set<unsigned> &Declared, const std::set<unsigned> &Hoist);
 

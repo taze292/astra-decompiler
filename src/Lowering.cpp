@@ -35,6 +35,39 @@ unsigned Function::Index(unsigned Pc) const
     return unsigned(Instruction);
 }
 
+int Function::OpenBaseAt(unsigned Pc) const
+{
+    // Recover a tuple's fixed base through straight-line compiler setup (for
+    // example GETIMPORT assert, FASTCALL, or CLOSEUPVALS). Keep the pack at its
+    // original evaluation point; only remove the dynamic prefix dispatcher.
+    unsigned Pos = Index(Pc);
+    int HighestWrite = -1;
+    for (unsigned Steps = 0; Steps < 64; ++Steps)
+    {
+        E.Analysis.Spend();
+        if (Flow.Predecessors[Pos].size() != 1)
+            return -1;
+        unsigned Previous = Flow.Predecessors[Pos][0];
+        if (Previous >= Pos)
+            return -1;
+        const auto &Producer = P.Instructions[Previous];
+        if (Producer.Op == LOP_SETLIST && !Producer.C)
+            return -1; // Consuming a tuple restores the VM frame top.
+        if (Producer.Op == LOP_FORGPREP || Producer.Op == LOP_FORGPREP_NEXT || Producer.Op == LOP_FORGPREP_INEXT ||
+            Producer.Op == LOP_FORGLOOP)
+            return -1; // Iteration can invoke another function and restore top.
+        if (Producer.Op == LOP_CALL || Producer.Op == LOP_CALLFB || Producer.Op == LOP_GETVARARGS)
+        {
+            bool Open = Producer.Op == LOP_GETVARARGS ? !Producer.B : !Producer.C;
+            return Open && HighestWrite < int(Producer.A) ? int(Producer.A) : -1;
+        }
+        for (unsigned Reg : Writes(Producer, P))
+            HighestWrite = std::max(HighestWrite, int(Reg));
+        Pos = Previous;
+    }
+    return -1;
+}
+
 std::string Function::ConstantAt(unsigned Index, unsigned Recursion) const
 {
     if (Recursion > 32)
@@ -360,9 +393,41 @@ void Function::Simple(const Instruction &I, std::vector<Statement> &Out)
         auto Next = Index(I.Next);
         if (Dispatch || Next >= P.Instructions.size())
             return false;
+        // Luau schedules NAMECALL after argument evaluation. An open result
+        // feeding that pair can stay a natural last argument, without packing
+        // every register or emitting a dynamic tuple-copy dispatcher.
+        unsigned Receiver = P.Stack;
+        unsigned ReceiverPc = I.Pc;
+        if (P.Instructions[Next].Op == LOP_NAMECALL || P.Instructions[Next].Op == LOP_NAMECALLUDATA)
+        {
+            const auto &Method = P.Instructions[Next];
+            if (Method.A + 2 > I.A || Method.B >= I.A || Flow.Predecessors[Next].size() != 1)
+                return false;
+            Receiver = Method.B;
+            ReceiverPc = Method.Pc;
+            Next = Index(Method.Next);
+        }
+        if (Next >= P.Instructions.size() || Flow.Predecessors[Next].size() != 1)
+            return false;
         const auto &Consumer = P.Instructions[Next];
-        return ((Consumer.Op == LOP_CALL || Consumer.Op == LOP_CALLFB) && !Consumer.B && Consumer.A < I.A) ||
-               (Consumer.Op == LOP_RETURN && !Consumer.B && Consumer.A <= I.A);
+        bool Call = (Consumer.Op == LOP_CALL || Consumer.Op == LOP_CALLFB) && !Consumer.B && Consumer.A < I.A;
+        bool Return = Consumer.Op == LOP_RETURN && !Consumer.B && Consumer.A <= I.A;
+        if (!Call && !Return)
+            return false;
+        // Moving a call into an expression must not move a mutable capture read
+        // before that call. Ordinary SSA locals already snapshot these values.
+        auto Stable = [&](unsigned Reg, unsigned Pc)
+        {
+            const auto &S = E.Symbols[SymbolAt(Reg, Pc)];
+            return !S.Cell && !S.ReferenceAlias;
+        };
+        if (Receiver != P.Stack && !Stable(Receiver, ReceiverPc))
+            return false;
+        unsigned Start = Receiver == P.Stack ? Consumer.A : Consumer.A + 2;
+        for (unsigned Reg = Start; Reg < I.A; ++Reg)
+            if (!Stable(Reg, Consumer.Pc))
+                return false;
+        return true;
     };
     switch (I.Op)
     {
@@ -499,10 +564,18 @@ void Function::Simple(const Instruction &I, std::vector<Statement> &Out)
             Args.push_back(std::move(OpenExpression));
             OpenExpression.clear();
         }
+        else if (int Base = OpenBaseAt(I.Pc); Base >= int(Start))
+        {
+            NeedsPack = true;
+            for (unsigned J = Start; J < unsigned(Base); ++J)
+                Args.push_back(R(J));
+            Args.push_back("table.unpack(" + Token(PackSymbol) + ", 1, " + Token(PackSymbol) + ".n)");
+        }
         else
         {
             // Open arguments consist of fixed registers followed by the most recent open result tuple.
             NeedsPack = true;
+            NeedsDynamicTop = true;
             unsigned Arguments = E.New("CallArguments", Id, true);
             auto TupleIndex = Token(E.New("TupleIndex", Id, true, true));
             Emit("local " + Token(Arguments) + " = {}");
@@ -576,7 +649,7 @@ void Function::Simple(const Instruction &I, std::vector<Statement> &Out)
             Emit(Token(TopSymbol) + " = " + std::to_string(I.A));
             // Fixed consumers can read the prefix of an open result tuple.
             for (unsigned J = I.A; J < P.Stack; ++J)
-                Out.push_back(Assign(J, I, Token(PackSymbol) + "[" + std::to_string(J - I.A + 1) + "]"));
+                Out.push_back(Assign(J, I, Token(PackSymbol) + "[" + std::to_string(J - I.A + 1) + "]", true));
         }
         break;
     }
@@ -593,9 +666,17 @@ void Function::Simple(const Instruction &I, std::vector<Statement> &Out)
             Values.push_back(std::move(OpenExpression));
             OpenExpression.clear();
         }
+        else if (int Base = OpenBaseAt(I.Pc); Base >= int(I.A))
+        {
+            NeedsPack = true;
+            for (unsigned J = I.A; J < unsigned(Base); ++J)
+                Values.push_back(R(J));
+            Values.push_back("table.unpack(" + Token(PackSymbol) + ", 1, " + Token(PackSymbol) + ".n)");
+        }
         else
         {
             NeedsPack = true;
+            NeedsDynamicTop = true;
             unsigned ReturnValues = E.New("ReturnValues", Id, true);
             auto TupleIndex = Token(E.New("TupleIndex", Id, true, true));
             Emit("local " + Token(ReturnValues) + " = {}");
@@ -689,9 +770,20 @@ void Function::Simple(const Instruction &I, std::vector<Statement> &Out)
         if (I.C)
             for (unsigned J = 0; J + 1 < I.C; ++J)
                 Emit(R(I.A) + "[" + std::to_string(I.Aux + J) + "] = " + R(I.B + J));
+        else if (int Base = OpenBaseAt(I.Pc); Base >= int(I.B))
+        {
+            NeedsPack = true;
+            for (unsigned J = I.B; J < unsigned(Base); ++J)
+                Emit(R(I.A) + "[" + std::to_string(I.Aux + J - I.B) + "] = " + R(J));
+            auto TupleIndex = Token(E.New("TupleIndex", Id, true, true));
+            Emit("for " + TupleIndex + " = 1, " + Token(PackSymbol) + ".n do\n    " + R(I.A) + "[" +
+                 std::to_string(I.Aux + unsigned(Base) - I.B - 1) + " + " + TupleIndex + "] = " + Token(PackSymbol) + "[" + TupleIndex +
+                 "]\nend");
+        }
         else
         {
             NeedsPack = true;
+            NeedsDynamicTop = true;
             auto TupleIndex = Token(E.New("TupleIndex", Id, true, true));
             for (unsigned J = I.B; J < P.Stack; ++J)
                 Emit("if " + Token(TopSymbol) + " > " + std::to_string(J) + " then " + R(I.A) + "[" + std::to_string(I.Aux + J - I.B) +
@@ -717,7 +809,7 @@ void Function::Simple(const Instruction &I, std::vector<Statement> &Out)
             Emit(Token(PackSymbol) + " = " + Token(VarargsSymbol));
             Emit(Token(TopSymbol) + " = " + std::to_string(I.A));
             for (unsigned J = I.A; J < P.Stack; ++J)
-                Out.push_back(Assign(J, I, Token(PackSymbol) + "[" + std::to_string(J - I.A + 1) + "]"));
+                Out.push_back(Assign(J, I, Token(PackSymbol) + "[" + std::to_string(J - I.A + 1) + "]", true));
         }
         break;
     case LOP_NEWCLASS:
