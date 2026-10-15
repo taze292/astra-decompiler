@@ -27,6 +27,8 @@ Each Engine owns its symbols, global-name reservations, parent relationships, ex
 
 The function's graph is built once and reused for dataflow and export analysis. Loop detection inspects predecessor edges instead of rescanning the remaining instruction stream. Dominator-tree intervals replace repeated ancestor walks. PC lookup and reaching-definition root lookup use contiguous arrays instead of node-allocated maps.
 
+Reference-capture analysis separates native lexical lifetimes from cases requiring boxes. Native capture unions begin at the captured reaching definition, not the register's first use. Loop-created captures and uses after close retain boxes; dispatch fallback restores register cells. Copy-capture definition counts and backedge intervals are cached per function. Statement simplification stops at convergence. See [capture reconstruction](READABILITY_REWRITE.md) for the invariants and fallback boundary.
+
 Local names remain provisional until simplification finishes. Only IDs appear in intermediate expressions. Finalization allocates names for surviving references and expands symbols/locators into a separate bounded output buffer. It avoids global provisional name allocation and repeated whole-source replacement.
 
 ## Failure and fallback
@@ -46,12 +48,12 @@ The Windows server already handled distinct clients on separate threads; that mo
 All payloads are text frames. IDs are 1–16 decimal digits. Hex encoding preserves arbitrary bytecode bytes.
 
 ```text
-RequestId\nTAZE3\nLineField\nHexModulePath\nHexOptions\nHexBytecode
+RequestId\nTAZE4\nLineField\nHexModulePath\nJsonOptions\nHexBytecode
 ```
 
-The decoded options block is at most 4,096 bytes, with `key=value` entries separated by semicolons and no trailing separator. Duplicate, unknown, reserved, and invalid options fail the request. Metadata paths are at most 8,192 decoded bytes. Resource overrides cannot exceed host caps. The server copies its base Options for each request, so overrides cannot leak into other requests.
+The options object is at most 4,096 bytes and contains scalar string, Boolean, or unsigned integer values. Its restricted JSON grammar accepts ASCII option identifiers/enum words, not escapes, nesting, null, or arbitrary expressions. Duplicate, unknown, reserved, and invalid options fail the request. Metadata paths are at most 8,192 decoded bytes. Resource overrides cannot exceed host caps. The server copies its base Options for each request, so overrides cannot leak into other requests.
 
-Legacy `RequestId\nHexBytecode` and TAZE2 metadata requests remain supported. Replies remain `RequestId\nok\nSource` or `RequestId\nerror\nMessage`. The v5 bridge requires the updated server to send TAZE3 requests; it does not silently retry against an old server with lost settings.
+Legacy raw, TAZE2 metadata, and TAZE3 hex-encoded semicolon options remain supported. Replies remain `RequestId\nok\nSource` or `RequestId\nerror\nMessage`. Bridge v6 requires this server for TAZE4 requests; it does not silently retry against an old server with lost settings.
 
 ## Development workflow
 

@@ -1,8 +1,38 @@
 # Validation record
 
-## Current local 0.3.0 rewrite — 2026-10-14
+## Current readability/configuration follow-up — 2026-10-15
 
-This section describes the current checkout. Sections below it preserve older release/session evidence and their historical counts.
+- All four CTest suites pass: 1,601 core checks, 1,642 pipeline checks, 40 WebSocket checks, and 7 batch CLI checks.
+- New behavior cases cover mutable scalar captures, closed-register reuse, per-iteration closures, nested reference propagation, captured-value snapshots, implicit method receivers, and nested receiver scopes. They run at O0/1/2, D0/2, native/boxed settings, and structured/forced-state-machine modes.
+- Eight direct-bytecode checks cover mutation and recapture after CLOSEUPVALS without a new register write, preserving the detached value independently of compiler-specific instruction shapes.
+- Bridge mocks verify zero installation printing, live replacement of TazeOptions and TazeConfig, per-call isolation, unique recursive lookup, duplicate-descendant explicit paths, duplicate-sibling suppression, escaped names, reconnect/timeout/error behavior, and hook restoration.
+- Transport checks cover JSON options, duplicate keys, malformed scalars, reserved keys, trailing data, host limits, the exact two-line header, and independent require/GC flags. Legacy protocols remain covered.
+- All six local CameraModule O0–2/D0–2 configurations decompiled with fallback disabled and recompiled successfully. Header-free output remains deterministic; elapsed headers are intentionally variable.
+
+### Live connected-game checks
+
+Bridge v6 was installed against the local server through Roblox MCP after explicit approval for local-server bytecode testing. The silent `TestReadability.luau` harness reported success for **eight targets × eight configurations**, plus eleven timed compiles and a settings-isolation comparison per target:
+
+| Target | Class | Header-free bytes | Closing boxes | GC-only locators |
+| --- | --- | --- | --- | --- |
+| GunModules.Projectile | ModuleScript | 3,878 | 0 | 3 |
+| GunModules.GunFramework.Projectile | ModuleScript | 3,904 | 0 | 3 |
+| PlayerModule.CameraModule | ModuleScript | 35,459 | 0 | 32 |
+| PlayerModule.ControlModule | ModuleScript | 38,049 | 0 | 42 |
+| PlayerScripts.Data | ModuleScript | 1,226 | 0 | 0 |
+| PlayerScripts.Load | LocalScript | 450 | 0 | 0 |
+| PlayerScripts.InputMangaer | LocalScript | 5,576 | 0 | 8 |
+| PlayerScripts.DisableCoreLeaderboard | LocalScript | 115 | 0 | 0 |
+
+Both Projectile modules had four closing-box assignments before the change. Their duplicate names correctly retain explicit paths. CameraModule and ControlModule use identity-checked unique descendant lookups within LocalPlayer. Require-disabled variants contain no require comments and still include GC comments for functions, including exported functions.
+
+The final build repeated all eight targets/configurations successfully. PlayerScripts was absent at that point, so the harness used the corresponding StarterPlayerScripts instances; output sizes and zero-box counts were unchanged. The separate CameraModule harness also passed 17 variants and four concurrent header-free comparisons. The final v6 bridge and rebuilt server were left connected.
+
+These live checks **compile** recovered source; they do not execute or replace game modules and do not prove complete semantic equivalence of third-party scripts. Behavioral equivalence is tested on the local executable fixtures. Results remain in `getgenv().TazeReadabilityValidation`; no live game bytecode was exported through MCP into the repository for this follow-up.
+
+## Earlier local 0.3.0 rewrite — 2026-10-14
+
+This section preserves the earlier architecture rewrite's release/session evidence and historical counts.
 
 - Release build: ClangCL 22.1.3, Windows SDK 10.0.26100; all four CTest suites pass.
 - Existing semantic/format/version suite: **1,593 passed, 0 failed**.

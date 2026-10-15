@@ -42,7 +42,7 @@ efdb830caeeac39f2d57c8bcf62671f7e77e5309ab718cb3ad06d9205551d52f
 ./build/Release/taze.exe --serve
 ```
 
-Execute **this checkout's `tools/Decompile.luau`** in the executor. Bridge v5 connects before replacing `getgenv().decompile`; supported cached references are hooked and restored on stop.
+Execute **this checkout's `tools/Decompile.luau`** in the executor. Bridge v6 connects before replacing `getgenv().decompile`; supported cached references are hooked and restored on stop. The bridge does not print or warn.
 
 ```luau
 local Camera = game:GetService("StarterPlayer"):FindFirstChild("CameraModule", true)
@@ -64,9 +64,17 @@ getgenv().TazeConfig = {
     Timeout = 30,
     MaxPending = 32,
     ErrorMode = "silent", -- or "raise" for debugging
-    Options = { casing = "camel", upvalues = false },
+}
+getgenv().TazeOptions = {
+    casing = "camel", naming = "inferred", upvalues = false,
+    ["require-locators"] = false, ["gc-locators"] = true,
+    ["method-syntax"] = true, ["native-captures"] = true,
 }
 ```
+
+Edit or replace `TazeOptions` at any time; every request sends a snapshot as JSON over WebSocket. Per-call options override it. See [all options](docs/OPTIONS.md) for naming prefixes, inference switches, casing, compact comments, spacing, and resource limits. The header reports bytecode version and real elapsed seconds; disable it for deterministic full-file comparisons.
+
+Captured locals now use lexical references where lifetime analysis proves safe, eliminating the closing table-copy noise in ordinary modules. Loop-created or reused capture identities retain conservative boxes. Methods use implicit lowercase `self`, arithmetic temporaries are folded where evaluation order permits, and loop guards become direct while conditions. See [the readability rewrite record](docs/READABILITY_REWRITE.md).
 
 Failures return nil by default. `TazeBridge.LastError` explains the failure; `.LastRequest` reports timing, sizes, request overrides, lookup counts, and path status. A timeout stops waiting, without cancelling C++ work. Calls reconnect after disconnection. `TazeBridge.Decompile` is a direct entry point; `TazeBridge.Stop()` restores previous functions.
 

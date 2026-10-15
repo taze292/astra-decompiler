@@ -13,16 +13,24 @@ CLI syntax is `--key value`. Boolean switches also support `--no-key`; `--state-
 | `naming` | `Naming` | `Inferred` | `inferred`, `debug`, `generic` |
 | `type-names` | `UseTypeNames` | true | Use TableN, NumberN, etc. for anonymous values with an unambiguous type |
 | `preserve-function-names` | `PreserveFunctionNames` | true | Keep recovered original function bindings' spelling; false applies the selected casing |
+| `method-syntax` | `MethodSyntax` | true | Recover `function Table:Method(...)` with implicit lowercase `self` |
+| `native-captures` | `NativeCaptures` | true | Use native reference locals when lifetime analysis proves safe; false retains boxes |
+| `infer-members` | `InferMemberNames` | true | Infer local names from accessed members |
+| `infer-calls` | `InferCallNames` | true | Infer service, module, constructor, Connection, and RaycastResult names |
+| `local-prefix` | `LocalPrefix` | `Value` | Prefix for anonymous locals without a selected type name; ASCII identifier, 1–32 characters |
+| `argument-prefix` | `ArgumentPrefix` | `Argument` | Prefix for anonymous parameters; same identifier rules |
 | `indent` | `IndentWidth` | 4 | Spaces per level, 1–16 |
-| `header` | `IncludeHeader` | true | Generator/version header |
+| `header` | `IncludeHeader` | true | Two-line generator/version and measured elapsed-time header |
 | `lines` | `IncludeLineComments` | true | Function line comments, including their lookup expressions |
-| `upvalues` | `IncludeUpvalueComments` | true | Numbered Copy/Reference capture comments |
+| `upvalues` | `IncludeUpvalueComments` | true | Copy/Reference capture comments |
+| `compact-upvalues` | `CompactUpvalues` | true | One-line capture list; false restores the numbered block |
+| `group-spacing` | `GroupSpacing` | true | Separate statement groups with blank lines |
 | `locators` | `IncludeFunctionLocators` | true | Master switch for both kinds of function lookup |
 | `gc-locators` | `IncludeGcLocators` | true | Allow `filtergc(...)` lookups |
 | `require-locators` | `IncludeRequireLocators` | true | Allow proven `require(ModulePath)` export paths |
 | `filter-line` | `FilterLineField` | `Line` | `Line` or `StartLine`; file/API only, bridge supplies detected metadata |
 | `module-path` | `ModulePath` | empty | Single-line ASCII Instance expression, ≤8,192 bytes; file/API only |
-| `optimization-passes` | `OptimizationPasses` | 5 | 0–8 statement simplification passes; 0 retains noisier lowering |
+| `optimization-passes` | `OptimizationPasses` | 5 | Maximum 0–8 simplification passes; stop earlier on convergence; 0 retains noisier lowering |
 | `state-machine` | `ForceStateMachine` | false | Force explicit program-counter control flow |
 | `fallback` | `AllowFallback` | true | Permit state-machine output when structuring cannot safely finish |
 | `max-input-bytes` | `MaxInputBytes` | 67,108,864 | 1–268,435,456 bytes |
@@ -44,6 +52,8 @@ The legacy `--no-filtergc` switch still disables **both** locator kinds for comp
 
 Names are allocated after simplification, in deterministic first-reference order. Global names and enclosing bindings are reserved; collisions receive numeric suffixes. Snake casing recognizes acronym boundaries (`HTTPServer` → `http_server`), camel casing gives `httpServer`, and reserved words receive a suffix. Original function names remain unchanged unless `preserve-function-names=false` or generic naming is selected.
 
+Implicit method receivers always use Luau's required spelling `self`, including in generic naming mode. Disable `method-syntax` to apply ordinary naming to explicit receivers. Method conversion is suppressed where it could shadow a captured outer receiver or a global `self`. Inference does not recover erased source names; it supplies hints from bytecode operations. For example, `Instance.new("Part")` suggests `Part`, event `Connect` suggests `Connection`, and raycasts suggest `RaycastResult`.
+
 ## Comment rules
 
 `lines=false` suppresses the entire function line/lookup comment. `locators=false` retains line numbers while hiding lookups. When require lookups are enabled and a reachable, unambiguous export is proven, that lookup takes priority. Otherwise GC is used if enabled. With GC disabled, unresolved functions have only their line number. No dangling separator is emitted.
@@ -54,7 +64,7 @@ GC lookups use serialized function names, never generated binding names. If both
 
 ## Live bridge configuration
 
-Start the local server, then execute the **local** `tools/Decompile.luau` (bridge v5). The previously published release loader remains pinned to its published version.
+Start the local server, then execute the **local** `tools/Decompile.luau` (bridge v6). The previously published release loader remains pinned to its published version. Installation and requests do not print or warn.
 
 ```luau
 getgenv().TazeConfig = {
@@ -62,13 +72,12 @@ getgenv().TazeConfig = {
     Timeout = 30,
     MaxPending = 32,
     ErrorMode = "silent", -- or "raise"
-    Options = {
-        casing = "camel",
-        naming = "inferred",
-        ["gc-locators"] = false,
-        ["require-locators"] = true,
-        ["preserve-function-names"] = false,
-    },
+}
+getgenv().TazeOptions = {
+    casing = "camel", naming = "inferred",
+    ["require-locators"] = false, ["gc-locators"] = true,
+    ["method-syntax"] = true, ["native-captures"] = true,
+    ["compact-upvalues"] = true, ["argument-prefix"] = "arg",
 }
 -- Execute tools/Decompile.luau after setting installation options.
 ```
@@ -78,12 +87,23 @@ local Camera = game:GetService("StarterPlayer"):FindFirstChild("CameraModule", t
 local Source = decompile(Camera)
 local Snake = decompile(Camera, { casing = "snake", lines = false })
 local Generic = decompile(Camera, 60, { naming = "generic", ["type-names"] = false })
-print(getgenv().TazeBridge.LastRequest)
+local Details = getgenv().TazeBridge.LastRequest
 ```
 
-Per-call options overlay `TazeConfig.Options` without changing it. Server CLI options are the base; only supplied request options override them. Resource limits can be reduced per request but never raised above server limits. The bridge has its own fixed 64 MiB bytecode cap. `module-path` and `filter-line` are reserved in option tables; the bridge supplies validated path metadata and probes the executor line field. Probing is skipped when GC lookups are disabled in defaults, and happens lazily if a later call enables them.
+Each call snapshots `getgenv().TazeOptions`, then overlays legacy `TazeConfig.Options` and per-call options. These input tables are never mutated. You can edit or replace either global table between requests without reinstalling. The bridge populates TazeOptions with documented presentation defaults when absent; a supplied partial table leaves unspecified fields to the server. The table is serialized as a bounded JSON object in each TAZE4 WebSocket message; no Luau code is evaluated by the server. Resource limits can be reduced per request but never raised above server limits. The bridge has its own fixed 64 MiB bytecode cap. `module-path` and `filter-line` are reserved in option tables; the bridge supplies validated path metadata and probes the executor line field. Probing is skipped when GC lookups are disabled in defaults, and happens lazily if a later call enables them.
 
-`Url`, `Timeout`, and `MaxPending` are captured at installation. `Options` and `ErrorMode` are read from that configuration table on each call. Edit the existing table to update them; reinstall after replacing the whole configuration table. `MaxPending` is 1–128. A timeout stops waiting and releases the pending slot; it does not cancel C++ work already running.
+`Url`, `Timeout`, and `MaxPending` are captured at installation; reinstall to change connection settings. `Options` and `ErrorMode` are read from the current configuration table on each call. `MaxPending` is 1–128. A timeout stops waiting and releases the pending slot; it does not cancel C++ work already running.
+
+Module lookup metadata comes from the live instance hierarchy. The bridge uses dot access only when it resolves to the actual child, otherwise escaped `FindFirstChild` segments. It shortens three or more remaining segments to `:FindFirstChild("Name", true)` only after counting exactly one matching descendant and checking identity. Searches start within the relevant service or local player, not the whole game. Duplicate sibling names suppress require paths; duplicate descendants retain the explicit path. Nothing is required or executed during this analysis. Paths describe the hierarchy at request time.
+
+The default header is exactly two comments followed by a blank line:
+
+```luau
+-- Decompiled with Taze's Decompiler | Bytecode Version: 14
+-- Time taken: 0.004497s
+```
+
+Time is measured inside the C++ decompiler from decoding through finalization, in seconds; it excludes WebSocket transfer, Roblox scheduling, and header formatting. `LastRequest.ElapsedSeconds` includes bridge work. Use `header=false` for byte-identical output comparisons and hashes; the generated body remains deterministic.
 
 Failures return nil by default. Inspect `TazeBridge.LastError` and `LastRequest.Succeeded/Error/ElapsedSeconds`; successful calls clear LastError and also report input/output sizes, resolved options, module-path status, GC/require counts, and line field. These fields describe the last completed call, so concurrent callers should use their own returned source. `ErrorMode="raise"` makes failures raise instead. Installation failures still return nil without replacing the original decompiler.
 
