@@ -32,6 +32,7 @@ Function::Function(Engine &Owner, unsigned Proto, std::vector<Upvalue> Captures,
                     continue;
                 std::vector<bool> Seen(P.Instructions.size());
                 std::vector<unsigned> Pending(Flow.Successors[J]);
+                bool ReadsClosed = false, EffectsAfterClose = false;
                 while (Safe && !Pending.empty())
                 {
                     unsigned N = Pending.back();
@@ -42,7 +43,34 @@ Function::Function(Engine &Owner, unsigned Proto, std::vector<Upvalue> Captures,
                     E.Analysis.Spend(1);
                     const auto &Next = P.Instructions[N];
                     auto Written = Writes(Next, P);
-                    if ((Capture && N == J) || (Close && std::find(Written.begin(), Written.end(), R) != Written.end()))
+                    auto Read = Close ? Reads(Next, P) : std::vector<unsigned>{};
+                    if (Close)
+                    {
+                        ReadsClosed |= std::find(Read.begin(), Read.end(), R) != Read.end();
+                        // A just-closed return is safe. Other operations can
+                        // mutate the detached upvalue or capture it anew.
+                        switch (Next.Op)
+                        {
+                        case LOP_NOP:
+                        case LOP_CLOSEUPVALS:
+                        case LOP_RETURN:
+                        case LOP_MOVE:
+                        case LOP_LOADNIL:
+                        case LOP_LOADB:
+                        case LOP_LOADN:
+                        case LOP_LOADK:
+                        case LOP_LOADKX:
+                        case LOP_JUMP:
+                        case LOP_JUMPBACK:
+                        case LOP_JUMPIF:
+                        case LOP_JUMPIFNOT:
+                            break;
+                        default:
+                            EffectsAfterClose = true;
+                        }
+                    }
+                    if ((Capture && N == J) || (Close && std::find(Written.begin(), Written.end(), R) != Written.end()) ||
+                        (ReadsClosed && EffectsAfterClose))
                         Safe = false;
                     Pending.insert(Pending.end(), Flow.Successors[N].begin(), Flow.Successors[N].end());
                 }

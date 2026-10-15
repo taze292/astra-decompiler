@@ -210,6 +210,49 @@ int main()
             ++Passed;
         };
         Luau::CompileOptions Compile;
+        // CLOSEUPVALS detaches the old value even without a subsequent register
+        // write. A call can mutate the old closure before the register is read or
+        // captured again. Exercise valid bytecode directly, not just compiler shapes.
+        for (bool Recapture : {false, true})
+        {
+            Luau::BytecodeBuilder Builder;
+            auto Child = Builder.beginFunction(0);
+            Builder.emitABC(LOP_GETUPVAL, 0, 0, 0);
+            Builder.emitAD(LOP_LOADN, 1, 1);
+            Builder.emitABC(LOP_ADD, 0, 0, 1);
+            Builder.emitABC(LOP_SETUPVAL, 0, 0, 0);
+            Builder.emitABC(LOP_RETURN, 0, 2, 0);
+            Builder.endFunction(2, 1);
+            auto Main = Builder.beginFunction(0);
+            auto Index = Builder.addChildFunction(Child);
+            Builder.emitAD(LOP_LOADN, 0, 5);
+            Builder.emitAD(LOP_NEWCLOSURE, 1, Index);
+            Builder.emitABC(LOP_CAPTURE, LCT_REF, 0, 0);
+            Builder.emitABC(LOP_CLOSEUPVALS, 0, 0, 0);
+            if (Recapture)
+            {
+                Builder.emitAD(LOP_NEWCLOSURE, 2, Index);
+                Builder.emitABC(LOP_CAPTURE, LCT_REF, 0, 0);
+            }
+            Builder.emitABC(LOP_MOVE, 3, 1, 0);
+            Builder.emitABC(LOP_CALL, 3, 1, 1);
+            if (Recapture)
+                Builder.emitABC(LOP_CALL, 2, 1, 1);
+            Builder.emitABC(LOP_RETURN, 0, 2, 0);
+            Builder.endFunction(4, 0);
+            Builder.setMainFunction(Main);
+            Builder.finalize();
+            const auto &Input = Builder.getBytecode();
+            for (bool Native : {false, true})
+                for (bool Machine : {false, true})
+                {
+                    Taze::Options O;
+                    O.NativeCaptures = Native;
+                    O.ForceStateMachine = Machine;
+                    Check(Execute(Luau::compile(Taze::Decompile(Input, O).Source)) == Execute(Input),
+                          "Closed reference lost its detached value");
+                }
+        }
         Compile.debugLevel = 2;
         Compile.optimizationLevel = 1;
         const std::string StyleSource = "local Shared = 7\n"

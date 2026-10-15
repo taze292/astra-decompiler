@@ -19,6 +19,7 @@ local Ok, Failure = pcall(function()
     local Framework = Guns and Guns:FindFirstChild("GunFramework")
     Add(Framework and Framework:FindFirstChild("Projectile"))
     local Scripts = Player and Player:FindFirstChild("PlayerScripts")
+        or game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts")
     for _, Name in { "CameraModule", "ControlModule", "Data" } do Add(Scripts and Scripts:FindFirstChild(Name, true)) end
     local LocalCount = 0
     for _, Target in if Scripts then Scripts:GetDescendants() else {} do
