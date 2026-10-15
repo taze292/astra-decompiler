@@ -78,6 +78,10 @@ void ApplyOption(Options &S, std::string_view Key, std::string_view Value)
         S.UseTypeNames = Boolean(Value);
     else if (Key == "preserve-function-names")
         S.PreserveFunctionNames = Boolean(Value);
+    else if (Key == "native-captures")
+        S.NativeCaptures = Boolean(Value);
+    else if (Key == "method-syntax")
+        S.MethodSyntax = Boolean(Value);
     else if (Key == "fallback")
         S.AllowFallback = Boolean(Value);
     else if (Key == "state-machine")

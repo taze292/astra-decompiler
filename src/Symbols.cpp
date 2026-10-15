@@ -80,8 +80,16 @@ std::string Engine::Resolve(std::string Text)
         }
         std::map<std::string, unsigned> Counters;
         for (auto Id : ByOwner[Owner])
+            if (Symbols[Id].ImplicitSelf)
+                Taken.insert("self");
+        for (auto Id : ByOwner[Owner])
         {
             auto &S = Symbols[Id];
+            if (S.ImplicitSelf)
+            {
+                S.Name = "self";
+                continue;
+            }
             std::string Base = S.Name;
             bool Generic = Base.starts_with("Value") && Base.size() > 5 &&
                            std::all_of(Base.begin() + 5, Base.end(), [](unsigned char C) { return std::isdigit(C); });

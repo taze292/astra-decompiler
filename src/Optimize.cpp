@@ -180,6 +180,26 @@ void Function::Optimize(std::vector<Statement> &Nodes)
                     auto Target = Next.Text.substr(0, Next.Text.size() - Suffix.size());
                     if (Target.find('.') != std::string::npos && Target.find('[') == std::string::npos && PrefixExpression(Target))
                     {
+                        auto Args = Tokens(S.Text.substr(9, S.Text.find(')') - 9));
+                        if (E.Settings.MethodSyntax && !Args.empty() && !E.GlobalNames.count("self"))
+                        {
+                            auto First = Args.front();
+                            const auto &Parameter = E.Symbols[First];
+                            bool Self = Parameter.Parameter && (Parameter.Original == "self" || Parameter.Original == "Self");
+                            for (auto U : Tokens(S.Text))
+                                if (U != First && E.Symbols[U].Owner != Parameter.Owner &&
+                                    (E.Symbols[U].Original == "self" || E.Symbols[U].Original == "Self"))
+                                    Self = false; // Do not shadow a captured outer receiver.
+                            if (Self)
+                            {
+                                E.Symbols[First].ImplicitSelf = true;
+                                Target[Target.rfind('.')] = ':';
+                                auto Length = Token(First).size();
+                                if (S.Text.substr(9 + Length, 2) == ", ")
+                                    Length += 2;
+                                S.Text.erase(9, Length);
+                            }
+                        }
                         S.Text = "function " + Target + S.Text.substr(8);
                         S.Type = Kind::Function;
                         S.Left.clear();

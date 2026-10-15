@@ -45,6 +45,8 @@ struct Options
     VariableNaming Naming = VariableNaming::Inferred;
     bool UseTypeNames = true;
     bool PreserveFunctionNames = true;
+    bool NativeCaptures = true;
+    bool MethodSyntax = true;
     bool ForceStateMachine = false;
     bool AllowFallback = true;
     unsigned OptimizationPasses = 5;

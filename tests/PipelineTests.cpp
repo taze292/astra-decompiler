@@ -122,6 +122,40 @@ return answer, text, count, x, y, recurse(5), string.upper("literal"), callbacks
                                 }
         }
         Luau::CompileOptions Debug;
+        const char *CaptureFixtures[] = {
+            "local n=0; local function inc(x) n+=x end; inc(4); inc(3); return n",
+            "local a; do local n=1; a=function() n+=1 return n end end; local n=40; return a(),a(),n",
+            "local fs={} for i=1,4 do local n=i; fs[i]=function() n+=1 return n end end return fs[1](),fs[4](),fs[1]()",
+            "local n=0; local function outer() return function() n+=1 return n end end; local f=outer(); return f(),f(),n",
+            "local n=0; local f=function() n+=1 end; local x=n; f(); return x,n",
+            "local t={x=3}; function t:add(n) self.x+=n return self.x end return t:add(4),t.x",
+            "local t={x=3}; function t:make() local a={x=5}; function a:add(n) self.x+=n return self.x end return a:add(self.x) end return "
+            "t:make()",
+            "local t={x=3}; function t:make() local outer=self; local a={x=5}; function a:add(n) self.x+=n return self.x+outer.x end "
+            "return a:add(2) end return t:make()"};
+        for (auto Fixture : CaptureFixtures)
+            for (int Level : {0, 1, 2})
+                for (int Symbols : {0, 2})
+                    for (bool Native : {false, true})
+                        for (bool Machine : {false, true})
+                        {
+                            Luau::CompileOptions C;
+                            C.optimizationLevel = Level;
+                            C.debugLevel = Symbols;
+                            auto Input = Luau::compile(Fixture, C);
+                            Taze::Options O;
+                            O.NativeCaptures = Native;
+                            O.ForceStateMachine = Machine;
+                            auto Output = Taze::Decompile(Input, O);
+                            Check(Execute(Luau::compile(Output.Source)) == Execute(Input), "Capture/method regression: " + Output.Source);
+                        }
+        {
+            auto Output = Taze::Decompile(Luau::compile(CaptureFixtures[0])).Source;
+            Check(Output.find("[1]") == std::string::npos, "Straight-line native capture still boxed");
+            auto Method = Taze::Decompile(Luau::compile(CaptureFixtures[5])).Source;
+            Check(Method.find(":add(") != std::string::npos && Method.find("self.") != std::string::npos,
+                  "Method receiver was not made implicit");
+        }
         Debug.debugLevel = 2;
         auto Bytes = Luau::compile(
             "local user_value = 9; local function mixedCaseFunction() return user_value end; return mixedCaseFunction", Debug);

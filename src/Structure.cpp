@@ -189,6 +189,12 @@ std::vector<Statement> Function::Region(unsigned Start, unsigned End, int BreakT
 std::vector<Statement> Function::StateMachine()
 {
     Dispatch = true;
+    for (unsigned R : ScalarReferences)
+    {
+        Cells.insert(R);
+        E.Symbols[Registers[R]].Cell = true;
+    }
+    ScalarReferences.clear();
     PendingMethod.clear();
     unsigned PcSymbol = E.New("ProgramCounter", Id, true);
     std::vector<Statement> Out{{Kind::Raw, {}, "-- Control flow required an explicit state machine."}, {Kind::Assign, {PcSymbol}, "0"}};

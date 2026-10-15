@@ -12,6 +12,47 @@ Function::Function(Engine &Owner, unsigned Proto, std::vector<Upvalue> Captures,
         for (auto [Kind, R] : I.Captures)
             if (Kind == LCT_REF)
                 Cells.insert(R);
+    // A reference local can use native lexical capture when its identity never
+    // needs to be split. Keep boxes for loop-created captures and register reuse
+    // after CLOSEUPVALS; those require a separate lifetime per closure instance.
+    if (E.Settings.NativeCaptures && !E.Settings.ForceStateMachine)
+        for (auto It = Cells.begin(); It != Cells.end();)
+        {
+            unsigned R = *It;
+            bool Safe = true;
+            for (unsigned J = 0; Safe && J < P.Instructions.size(); ++J)
+            {
+                const auto &I = P.Instructions[J];
+                bool Capture =
+                    std::any_of(I.Captures.begin(), I.Captures.end(), [&](auto C) { return C.first == LCT_REF && C.second == R; });
+                bool Close = I.Op == LOP_CLOSEUPVALS && R >= I.A;
+                if (!Capture && !Close)
+                    continue;
+                std::vector<bool> Seen(P.Instructions.size());
+                std::vector<unsigned> Pending(Flow.Successors[J]);
+                while (Safe && !Pending.empty())
+                {
+                    unsigned N = Pending.back();
+                    Pending.pop_back();
+                    if (N >= P.Instructions.size() || Seen[N])
+                        continue;
+                    Seen[N] = true;
+                    E.Analysis.Spend(1);
+                    const auto &Next = P.Instructions[N];
+                    auto Written = Writes(Next, P);
+                    if ((Capture && N == J) || (Close && std::find(Written.begin(), Written.end(), R) != Written.end()))
+                        Safe = false;
+                    Pending.insert(Pending.end(), Flow.Successors[N].begin(), Flow.Successors[N].end());
+                }
+            }
+            if (Safe)
+            {
+                ScalarReferences.insert(R);
+                It = Cells.erase(It);
+            }
+            else
+                ++It;
+        }
     for (unsigned R = 0; R < P.Stack; ++R)
     {
         std::string Name = R < P.Parameters ? "Argument" + std::to_string(R + 1) : "Value" + std::to_string(R + 1);
@@ -151,6 +192,34 @@ void Function::BuildDataflow()
                         Union(ReadSymbols[Next][R], State[R]);
         }
     }
+    // Join only the captured value and subsequent writes while that upvalue is
+    // open. Earlier values in the same physical register remain independent.
+    std::set<unsigned> CapturedDefinitions;
+    for (unsigned J = 0; J < Count; ++J)
+        for (auto [Kind, R] : P.Instructions[J].Captures)
+            if (Kind == LCT_REF && ScalarReferences.count(R) && Visited[J])
+            {
+                unsigned D = (R == P.Instructions[J].A ? WriteSymbols : ReadSymbols)[J][R];
+                CapturedDefinitions.insert(D);
+                std::vector<bool> Seen(Count);
+                std::vector<unsigned> Pending(Flow.Successors[J]);
+                while (!Pending.empty())
+                {
+                    unsigned N = Pending.back();
+                    Pending.pop_back();
+                    if (N >= Count || Seen[N] || !Visited[N])
+                        continue;
+                    Seen[N] = true;
+                    E.Analysis.Spend(1);
+                    const auto &I = P.Instructions[N];
+                    if (I.Op == LOP_CLOSEUPVALS && R >= I.A)
+                        continue;
+                    for (auto [Register, Definition] : Definitions[N])
+                        if (Register == R)
+                            Union(D, Definition);
+                    Pending.insert(Pending.end(), Flow.Successors[N].begin(), Flow.Successors[N].end());
+                }
+            }
     constexpr unsigned Missing = std::numeric_limits<unsigned>::max();
     std::vector<unsigned> RootSymbol(Parent.size(), Missing);
     for (unsigned R = 0; R < P.Stack; ++R)
@@ -194,6 +263,12 @@ void Function::BuildDataflow()
         }
     }
 
+    for (auto D : CapturedDefinitions)
+    {
+        auto &S = E.Symbols[RootSymbol[Find(D)]];
+        S.Keep = true;
+        S.ReferenceAlias = true;
+    }
     if (!E.Settings.UseTypeNames)
         return;
     // Union possible types over all definitions, including loop/branch joins. Only

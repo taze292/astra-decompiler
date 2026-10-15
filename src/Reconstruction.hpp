@@ -71,6 +71,7 @@ struct Symbol
     std::string Original;
     bool Preserve = false;
     bool Debug = false;
+    bool ImplicitSelf = false;
 };
 struct Upvalue
 {
@@ -99,6 +100,7 @@ class Function
     std::vector<unsigned> Parameters;
     std::vector<std::vector<unsigned>> ReadSymbols, WriteSymbols;
     std::set<unsigned> Cells;
+    std::set<unsigned> ScalarReferences;
     std::vector<Statement> Prefix;
     unsigned PackSymbol, TopSymbol, VarargsSymbol;
     bool NeedsPack = false, NeedsVarargs = false;

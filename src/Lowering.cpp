@@ -163,6 +163,11 @@ std::string Function::Closure(const Instruction &I, std::vector<Statement> &Out)
         if (Kind == LCT_UPVAL)
         {
             U = Upvalues.at(R);
+            if (U.Cell.empty())
+            {
+                Captures.push_back(std::move(U));
+                continue;
+            }
             Argument = U.Reference ? U.Cell : U.Value;
         }
         else
@@ -170,6 +175,12 @@ std::string Function::Closure(const Instruction &I, std::vector<Statement> &Out)
             unsigned S = SymbolAt(R, I.Pc, R == I.A);
             U.Name = E.Symbols[S].Name;
             U.Reference = Kind == LCT_REF;
+            if (U.Reference && !E.Symbols[S].Cell)
+            {
+                U.Value = Token(S);
+                Captures.push_back(std::move(U));
+                continue;
+            }
             Argument = U.Reference ? Token(Registers[R]) : Read(R, I.Pc);
         }
         if (Kind == LCT_VAL && R == I.A)
@@ -522,6 +533,10 @@ void Function::Simple(const Instruction &I, std::vector<Statement> &Out)
         std::string ResultHint;
         if (Method && (PendingMethod == "GetService" || PendingMethod == "WaitForChild" || PendingMethod == "FindFirstChild") && I.B > 2)
             ResultHint = Hints[SymbolAt(Start, I.Pc)];
+        else if (Method && (PendingMethod == "Connect" || PendingMethod == "Once"))
+            ResultHint = "Connection";
+        else if (Method && (PendingMethod == "Raycast" || PendingMethod == "Blockcast" || PendingMethod == "Spherecast"))
+            ResultHint = "RaycastResult";
         else if (!Method)
         {
             auto CallableHint = Hints[SymbolAt(I.A, I.Pc)];
@@ -529,6 +544,8 @@ void Function::Simple(const Instruction &I, std::vector<Statement> &Out)
                 ResultHint = I.B ? Hints[SymbolAt(I.A + 1, I.Pc)] : OpenHint;
             else if (CallableHint.ends_with(".new"))
                 ResultHint = CallableHint.substr(0, CallableHint.size() - 4);
+            if (CallableHint == "Instance.new" && I.B > 1 && !Hints[SymbolAt(Start, I.Pc)].empty())
+                ResultHint = Hints[SymbolAt(Start, I.Pc)];
         }
         if (!ResultHint.empty())
             Hint(ResultHint, I.C == 2);
