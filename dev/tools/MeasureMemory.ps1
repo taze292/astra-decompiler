@@ -1,8 +1,8 @@
 param(
     [Parameter(Mandatory)][string]$InputPath,
     [Parameter(Mandatory)][string]$BaselineDirectory,
-    [string]$BuildDirectory = "$PSScriptRoot/../build/Release",
-    [string]$OutputDirectory = "$PSScriptRoot/../artifacts/rewrite/memory"
+    [string]$BuildDirectory = "$PSScriptRoot/../../build/Release",
+    [string]$OutputDirectory = "$PSScriptRoot/../../artifacts/rewrite/memory"
 )
 $ErrorActionPreference = 'Stop'
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null

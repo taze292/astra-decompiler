@@ -1,8 +1,8 @@
 param(
     [Parameter(Mandatory)][string[]]$Inputs,
     [Parameter(Mandatory)][string]$BaselineDirectory,
-    [string]$BuildDirectory = "$PSScriptRoot/../build/Release",
-    [string]$OutputDirectory = "$PSScriptRoot/../artifacts/rewrite/comparison",
+    [string]$BuildDirectory = "$PSScriptRoot/../../build/Release",
+    [string]$OutputDirectory = "$PSScriptRoot/../../artifacts/rewrite/comparison",
     [ValidateRange(5, 100000)][int]$Samples = 100,
     [switch]$RequireIdentical
 )

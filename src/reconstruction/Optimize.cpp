@@ -8,7 +8,7 @@ bool Function::Optimize(std::vector<Statement> &Nodes)
     bool Changed = false;
     std::function<bool(const Statement &, const Statement &)> Equal = [&](const auto &A, const auto &B)
     {
-        return A.Type == B.Type && A.Left == B.Left && A.Text == B.Text && A.Body.size() == B.Body.size() &&
+        return A.Type == B.Type && A.Left == B.Left && A.Text == B.Text && A.Lifetime == B.Lifetime && A.Body.size() == B.Body.size() &&
                A.Else.size() == B.Else.size() && std::equal(A.Body.begin(), A.Body.end(), B.Body.begin(), Equal) &&
                std::equal(A.Else.begin(), A.Else.end(), B.Else.begin(), Equal);
     };

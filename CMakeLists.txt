@@ -1,8 +1,9 @@
 cmake_minimum_required(VERSION 3.20)
-project(AstraDecompiler VERSION 0.4.0 LANGUAGES CXX)
+project(AstraDecompiler VERSION 0.5.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/luau/Common/include/Luau/Bytecode.h")
     set(ASTRA_DEFAULT_LUAU "${CMAKE_CURRENT_SOURCE_DIR}/luau")
 else()
@@ -13,65 +14,46 @@ if(NOT EXISTS "${ASTRA_LUAU_DIR}/Common/include/Luau/Bytecode.h")
     message(FATAL_ERROR "Set ASTRA_LUAU_DIR to a Luau checkout. See README.md.")
 endif()
 
+set(ASTRA_INTERNAL_INCLUDE_DIRS
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/bytecode"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/analysis"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/reconstruction")
+
 add_library(AstraDecompiler
-    src/Bytecode.cpp src/ControlFlow.cpp src/Exports.cpp src/Decompiler.cpp src/Options.cpp src/Batch.cpp
-    src/Expressions.cpp src/Symbols.cpp src/Analysis.cpp src/Lowering.cpp
-    src/Structure.cpp src/Predicates.cpp src/Optimize.cpp src/Render.cpp)
-target_include_directories(AstraDecompiler PUBLIC include PRIVATE "${ASTRA_LUAU_DIR}/Common/include")
+    src/api/Decompiler.cpp
+    src/api/Options.cpp
+    src/api/Batch.cpp
+    src/bytecode/Bytecode.cpp
+    src/analysis/ControlFlow.cpp
+    src/analysis/Exports.cpp
+    src/reconstruction/Analysis.cpp
+    src/reconstruction/Expressions.cpp
+    src/reconstruction/Lowering.cpp
+    src/reconstruction/Optimize.cpp
+    src/reconstruction/Predicates.cpp
+    src/reconstruction/Render.cpp
+    src/reconstruction/Structure.cpp
+    src/reconstruction/Symbols.cpp)
+target_include_directories(AstraDecompiler
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    PRIVATE ${ASTRA_INTERNAL_INCLUDE_DIRS} "${ASTRA_LUAU_DIR}/Common/include")
 if(MSVC)
     target_compile_options(AstraDecompiler PRIVATE /W4 /EHsc)
 else()
     target_compile_options(AstraDecompiler PRIVATE -Wall -Wextra -Wpedantic)
 endif()
+
 find_package(Threads REQUIRED)
 target_link_libraries(AstraDecompiler PRIVATE Threads::Threads)
-add_executable(astra src/Main.cpp src/WebSocketServer.cpp src/BatchFiles.cpp)
+
+add_executable(astra
+    src/cli/Main.cpp
+    src/cli/WebSocketServer.cpp
+    src/cli/BatchFiles.cpp)
 target_link_libraries(astra PRIVATE AstraDecompiler)
-add_executable(astra-bench tools/Benchmark.cpp)
-target_link_libraries(astra-bench PRIVATE AstraDecompiler)
-add_executable(astra-batch-bench tools/BatchBenchmark.cpp)
-target_link_libraries(astra-batch-bench PRIVATE AstraDecompiler)
 if(WIN32)
     target_link_libraries(astra PRIVATE ws2_32 bcrypt)
 endif()
 
-option(ASTRA_BUILD_TESTS "Build compiler/VM round-trip tests and fixture compiler" ON)
-if(ASTRA_BUILD_TESTS)
-    set(LUAU_BUILD_CLI OFF CACHE BOOL "" FORCE)
-    set(LUAU_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-    add_subdirectory("${ASTRA_LUAU_DIR}" "luau" EXCLUDE_FROM_ALL)
-    enable_testing()
-    add_executable(astra-tests tests/Tests.cpp)
-    target_link_libraries(astra-tests PRIVATE AstraDecompiler Luau.Compiler Luau.VM)
-    target_include_directories(astra-tests PRIVATE "${ASTRA_LUAU_DIR}/Common/include")
-    target_compile_definitions(astra-tests PRIVATE ASTRA_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
-    add_test(NAME RoundTrip COMMAND astra-tests)
-    add_executable(astra-pipeline-tests tests/PipelineTests.cpp)
-    target_link_libraries(astra-pipeline-tests PRIVATE AstraDecompiler Luau.Compiler Luau.VM)
-    add_test(NAME Pipeline COMMAND astra-pipeline-tests)
-    add_executable(astra-control-flow-tests tests/ControlFlowStress.cpp)
-    target_link_libraries(astra-control-flow-tests PRIVATE AstraDecompiler Luau.Compiler Luau.VM)
-    add_test(NAME ControlFlowStress COMMAND astra-control-flow-tests)
-    set_tests_properties(ControlFlowStress PROPERTIES TIMEOUT 120)
-    add_executable(astra-inline-recovery-tests tests/InlineRecoveryTests.cpp)
-    target_link_libraries(astra-inline-recovery-tests PRIVATE AstraDecompiler Luau.Compiler Luau.VM)
-    add_test(NAME InlineRecovery COMMAND astra-inline-recovery-tests)
-    set_tests_properties(InlineRecovery PROPERTIES TIMEOUT 30)
-    add_executable(astra-compile tools/Compile.cpp)
-    target_link_libraries(astra-compile PRIVATE Luau.Compiler Luau.VM)
-    if(WIN32)
-        find_program(ASTRA_POWERSHELL NAMES pwsh powershell)
-        if(ASTRA_POWERSHELL)
-            add_test(NAME WebSocketBridge COMMAND "${ASTRA_POWERSHELL}" -NoProfile -ExecutionPolicy Bypass
-                -File "${CMAKE_CURRENT_SOURCE_DIR}/tests/WebSocket.ps1"
-                -Executable $<TARGET_FILE:astra> -Compiler $<TARGET_FILE:astra-compile>
-                -WorkDirectory "${CMAKE_CURRENT_BINARY_DIR}/WebSocketTests")
-            set_tests_properties(WebSocketBridge PROPERTIES TIMEOUT 60)
-            add_test(NAME BatchCLI COMMAND "${ASTRA_POWERSHELL}" -NoProfile -ExecutionPolicy Bypass
-                -File "${CMAKE_CURRENT_SOURCE_DIR}/tests/Batch.ps1"
-                -Executable $<TARGET_FILE:astra> -Compiler $<TARGET_FILE:astra-compile>
-                -WorkDirectory "${CMAKE_CURRENT_BINARY_DIR}/BatchTests")
-            set_tests_properties(BatchCLI PROPERTIES TIMEOUT 60)
-        endif()
-    endif()
-endif()
+include(cmake/DeveloperTools.cmake)
+include(cmake/Tests.cmake)

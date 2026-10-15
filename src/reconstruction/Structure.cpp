@@ -112,8 +112,9 @@ bool Function::EquivalentExit(unsigned Left, unsigned Right) const
     return A.Op == LOP_RETURN && B.Op == LOP_RETURN && A.A == B.A && A.B == B.B;
 }
 
-unsigned Function::LoopContinuation(unsigned Head, unsigned Tail, unsigned Limit, std::vector<Statement> &Before)
+unsigned Function::LoopContinuation(unsigned Head, unsigned Tail, unsigned Limit, std::vector<Statement> &Before, bool &GuardDefault)
 {
+    GuardDefault = false;
     const unsigned Finish = Tail + 1;
     unsigned Join = Finish;
     for (unsigned K = Head + 1; K < Tail; ++K)
@@ -124,17 +125,42 @@ unsigned Function::LoopContinuation(unsigned Head, unsigned Tail, unsigned Limit
         unsigned Target = Index(unsigned(Edge.Target()));
         if (Target <= Finish)
             continue;
-        if (Target > Limit || (Join != Finish && Join != Target))
+        if (Join != Finish && Join != Target)
             return Finish;
         Join = Target;
     }
     if (Join == Finish)
         return Finish;
-    std::bitset<256> Defaults;
-    for (unsigned K = Finish; K < Join; ++K)
+    auto Guard = [&]()
     {
+        GuardDefault = true;
+        return Join;
+    };
+    // An inlined return can leave several nested loops. The caller propagates
+    // this exit through a compact completion flag, rather than moving an outer
+    // loop's tail into this loop's exhaustion path.
+    if (Join > Limit)
+        return Guard();
+    std::bitset<256> Defaults;
+    std::set<unsigned> Sources;
+    std::vector<unsigned> DefaultPath;
+    for (unsigned K = Finish; K != Join;)
+    {
+        if (K > Join)
+            return Guard();
         const auto &I = P.Instructions[K];
         E.Analysis.Spend();
+        // Exhaustion may jump over an alternate branch's entire loop before
+        // reaching a shared default. Inspect the executed path, not every
+        // physically intervening instruction.
+        if (Jump(I.Op))
+        {
+            unsigned Next = Index(unsigned(I.Target()));
+            if (Next <= K || Next > Join)
+                return Guard();
+            K = Next;
+            continue;
+        }
         bool Literal = I.Op == LOP_LOADNIL || I.Op == LOP_LOADN || (I.Op == LOP_LOADB && !I.C);
         if (I.Op == LOP_LOADK || I.Op == LOP_LOADKX)
         {
@@ -143,10 +169,24 @@ unsigned Function::LoopContinuation(unsigned Head, unsigned Tail, unsigned Limit
         }
         const auto &Prep = P.Instructions[Head];
         unsigned HiddenEnd = Prep.A + 3 + (Prep.Op == LOP_FORNPREP ? 0 : (P.Instructions[Tail].Aux & 255));
+        if (I.Op == LOP_MOVE)
+        {
+            unsigned Source = SymbolAt(I.B, I.Pc);
+            const auto &Value = E.Symbols[Source];
+            // Native SSA locals are stable snapshots. Reference aliases may
+            // change during a call, and loop-produced values cannot be read
+            // before the loop starts.
+            if (Value.Cell || Value.ReferenceAlias || Source != ReadSymbols[Head][I.B] || (I.B >= Prep.A && I.B < HiddenEnd))
+                return Guard();
+            Sources.insert(Source);
+            Literal = true;
+        }
         if (!Literal || Cells.count(I.A) || ScalarReferences.count(I.A) || Flow.LiveIn[Head + 1].test(I.A) ||
             (I.A >= Prep.A && I.A < HiddenEnd))
-            return Finish;
+            return Guard();
         Defaults.set(I.A);
+        DefaultPath.push_back(K);
+        ++K;
     }
     // A default may move before the loop only when normal exhaustion cannot
     // retain a body write to it. Early-return writes must leave through Join.
@@ -160,13 +200,16 @@ unsigned Function::LoopContinuation(unsigned Head, unsigned Tail, unsigned Limit
             continue;
         ReachesTail[K - Head] = true;
         E.Analysis.Spend(1 + Flow.Predecessors[K].size());
-        if (K != Tail)
-            for (unsigned R : Writes(P.Instructions[K], P))
-                if (Defaults.test(R))
-                    return Finish;
+        for (unsigned R : Writes(P.Instructions[K], P))
+        {
+            if (K != Tail && Defaults.test(R))
+                return Guard();
+            if (Sources.count(WriteSymbols[K][R]))
+                return Guard();
+        }
         Pending.insert(Pending.end(), Flow.Predecessors[K].begin(), Flow.Predecessors[K].end());
     }
-    for (unsigned K = Finish; K < Join; ++K)
+    for (unsigned K : DefaultPath)
         Simple(P.Instructions[K], Before);
     return Join;
 }
@@ -235,7 +278,7 @@ void Function::FindLoopRegions()
 }
 
 std::vector<Statement> Function::Region(unsigned Start, unsigned End, int BreakTarget, int ContinueTarget, unsigned Level,
-                                        bool IgnoreBackedge)
+                                        bool IgnoreBackedge, unsigned BreakFlag, int NormalBreakTarget)
 {
     if (Level > 150)
         throw Unstructured("control-flow nesting too deep");
@@ -245,6 +288,7 @@ std::vector<Statement> Function::Region(unsigned Start, unsigned End, int BreakT
         throw Unstructured("region starts after its boundary: " + std::to_string(Start) + ".." + std::to_string(End));
     const int BreakDestination = BreakTarget < 0 ? -1 : int(JumpDestination(unsigned(BreakTarget)));
     const int ContinueDestination = ContinueTarget < 0 ? -1 : int(JumpDestination(unsigned(ContinueTarget)));
+    const int NormalBreakDestination = NormalBreakTarget < 0 ? -1 : int(JumpDestination(unsigned(NormalBreakTarget)));
     while (Pos != Limit && Pos < P.Instructions.size())
     {
         E.Analysis.Spend();
@@ -260,12 +304,15 @@ std::vector<Statement> Function::Region(unsigned Start, unsigned End, int BreakT
             for (unsigned Steps = 0; Steps < 64; ++Steps)
             {
                 bool IsBreak = Target >= 0 && (Target == BreakTarget || Target == BreakDestination);
+                bool IsNormalBreak = Target >= 0 && (Target == NormalBreakTarget || Target == NormalBreakDestination);
                 bool IsContinue = Target >= 0 && (Target == ContinueTarget || Target == ContinueDestination);
-                if (IsBreak || IsContinue)
+                if (IsBreak || IsNormalBreak || IsContinue)
                 {
                     for (unsigned Node : Cleanup)
                         Simple(P.Instructions[Node], Body);
-                    Body.push_back({IsBreak ? Kind::Break : Kind::Continue});
+                    if (IsBreak && !IsNormalBreak && BreakFlag != std::numeric_limits<unsigned>::max())
+                        Body.push_back({Kind::Assign, {BreakFlag}, "false"});
+                    Body.push_back({IsBreak || IsNormalBreak ? Kind::Break : Kind::Continue});
                     return true;
                 }
                 if (Target < 0 || unsigned(Target) >= P.Code.size())
@@ -312,6 +359,8 @@ std::vector<Statement> Function::Region(unsigned Start, unsigned End, int BreakT
                 throw Unstructured("loop leaves its containing region");
             unsigned ExitPc = Finish == P.Instructions.size() ? unsigned(P.Code.size()) : P.Instructions[Finish].Pc;
             Statement Loop{Kind::While, {}, "true"};
+            if (auto Found = LoopReferenceHoists.find(I.Pc); Found != LoopReferenceHoists.end())
+                Loop.Lifetime.assign(Found->second.begin(), Found->second.end());
             Loop.Body = Region(I.Pc, ExitPc, int(ExitPc), int(I.Pc), Level + 1, true);
             if (Loop.Body.empty() ||
                 (Loop.Body.back().Type != Kind::Continue && Loop.Body.back().Type != Kind::Return && Loop.Body.back().Type != Kind::Break))
@@ -367,15 +416,40 @@ std::vector<Statement> Function::Region(unsigned Start, unsigned End, int BreakT
             }
             unsigned Counter = E.New("Index", Id, true, true);
             Statement Loop{Kind::For};
-            unsigned Continuation = LoopContinuation(Pos, TailIndex, Limit, Out);
+            if (auto Found = LoopReferenceHoists.find(I.Next); Found != LoopReferenceHoists.end())
+                Loop.Lifetime.assign(Found->second.begin(), Found->second.end());
+            bool GuardDefault;
+            unsigned Continuation = LoopContinuation(Pos, TailIndex, Limit, Out, GuardDefault);
             Loop.Left = {Counter};
             Loop.Text = Token(Counter) + " = " + Read(I.A + 2, I.Pc) + ", " + Read(I.A, I.Pc) + ", " + Read(I.A + 1, I.Pc);
             int BreakPc = Continuation == Finish
                               ? I.Target()
                               : int(Continuation == P.Instructions.size() ? P.Code.size() : P.Instructions[Continuation].Pc);
-            Loop.Body = Region(I.Next, Tail.Pc, BreakPc, int(Tail.Pc), Level + 1);
+            unsigned Completed = std::numeric_limits<unsigned>::max();
+            if (GuardDefault)
+            {
+                Completed = E.New("LoopCompleted", Id, true);
+                Out.push_back({Kind::Assign, {Completed}, "true"});
+            }
+            Loop.Body = Region(I.Next, Tail.Pc, BreakPc, int(Tail.Pc), Level + 1, false, Completed, GuardDefault ? int(Tail.Next) : -1);
             Loop.Body.insert(Loop.Body.begin(), Assign(I.A + 2, P.Instructions[Pos + 1], Token(Counter), true));
             Out.push_back(std::move(Loop));
+            if (GuardDefault && Continuation > Limit)
+            {
+                Statement Escaped{Kind::If, {}, "not " + Token(Completed)};
+                if (!ExitRoute(BreakPc, Escaped.Body))
+                    throw Unstructured("nested numeric loop has an unsupported exit at " + std::to_string(BreakPc));
+                Out.push_back(std::move(Escaped));
+                Pos = Finish;
+                continue;
+            }
+            if (GuardDefault)
+            {
+                Statement Exhausted{Kind::If, {}, Token(Completed)};
+                Exhausted.Body =
+                    Region(Tail.Next, unsigned(BreakPc), BreakTarget, ContinueTarget, Level + 1, false, BreakFlag, NormalBreakTarget);
+                Out.push_back(std::move(Exhausted));
+            }
             Pos = Continuation;
             continue;
         }
@@ -383,7 +457,9 @@ std::vector<Statement> Function::Region(unsigned Start, unsigned End, int BreakT
         {
             unsigned Finish = LoopTail(I);
             if (Finish >= Limit)
-                throw Unstructured("generic loop leaves region");
+                throw Unstructured("generic loop at " + std::to_string(I.Pc) + " tail " +
+                                   (Finish < P.Instructions.size() ? std::to_string(P.Instructions[Finish].Pc) : "missing") +
+                                   " leaves region " + std::to_string(Start) + ".." + std::to_string(End));
             const auto &Tail = P.Instructions[Finish];
             if (Tail.Op != LOP_FORGLOOP || Tail.A != I.A || Tail.Target() != int(I.Next))
                 throw Unstructured("noncanonical generic loop");
@@ -391,7 +467,10 @@ std::vector<Statement> Function::Region(unsigned Start, unsigned End, int BreakT
             if (!NativeGenericLoop(P, Flow, Pos, Finish, E.Analysis, &Failure))
                 throw Unstructured("generic loop at " + std::to_string(I.Pc) + ": " + Failure);
             Statement Loop{Kind::For};
-            unsigned Continuation = LoopContinuation(Pos, Finish, Limit, Out);
+            if (auto Found = LoopReferenceHoists.find(I.Next); Found != LoopReferenceHoists.end())
+                Loop.Lifetime.assign(Found->second.begin(), Found->second.end());
+            bool GuardDefault;
+            unsigned Continuation = LoopContinuation(Pos, Finish, Limit, Out, GuardDefault);
             std::vector<std::string> Vars;
             for (unsigned J = 0; J < (Tail.Aux & 255); ++J)
             {
@@ -403,10 +482,32 @@ std::vector<Statement> Function::Region(unsigned Start, unsigned End, int BreakT
             int BreakPc = Continuation == Finish + 1
                               ? int(Tail.Next)
                               : int(Continuation == P.Instructions.size() ? P.Code.size() : P.Instructions[Continuation].Pc);
-            Loop.Body = Region(I.Next, Tail.Pc, BreakPc, int(Tail.Pc), Level + 1);
+            unsigned Completed = std::numeric_limits<unsigned>::max();
+            if (GuardDefault)
+            {
+                Completed = E.New("LoopCompleted", Id, true);
+                Out.push_back({Kind::Assign, {Completed}, "true"});
+            }
+            Loop.Body = Region(I.Next, Tail.Pc, BreakPc, int(Tail.Pc), Level + 1, false, Completed, GuardDefault ? int(Tail.Next) : -1);
             for (unsigned J = unsigned(Vars.size()); J-- > 0;)
                 Loop.Body.insert(Loop.Body.begin(), Assign(I.A + 3 + J, P.Instructions[Pos + 1], Vars[J], true));
             Out.push_back(std::move(Loop));
+            if (GuardDefault && Continuation > Limit)
+            {
+                Statement Escaped{Kind::If, {}, "not " + Token(Completed)};
+                if (!ExitRoute(BreakPc, Escaped.Body))
+                    throw Unstructured("nested generic loop has an unsupported exit at " + std::to_string(BreakPc));
+                Out.push_back(std::move(Escaped));
+                Pos = Finish + 1;
+                continue;
+            }
+            if (GuardDefault)
+            {
+                Statement Exhausted{Kind::If, {}, Token(Completed)};
+                Exhausted.Body =
+                    Region(Tail.Next, unsigned(BreakPc), BreakTarget, ContinueTarget, Level + 1, false, BreakFlag, NormalBreakTarget);
+                Out.push_back(std::move(Exhausted));
+            }
             Pos = Continuation;
             continue;
         }
@@ -518,8 +619,8 @@ std::vector<Statement> Function::Region(unsigned Start, unsigned End, int BreakT
                     for (const auto &Part : Predicates)
                     {
                         Statement Guard{Kind::If, {}, "not " + Token(Match)};
-                        Guard.Body =
-                            Region(P.Instructions[Part.First].Pc, P.Instructions[Part.Test].Pc, BreakTarget, ContinueTarget, Level + 1);
+                        Guard.Body = Region(P.Instructions[Part.First].Pc, P.Instructions[Part.Test].Pc, BreakTarget, ContinueTarget,
+                                            Level + 1, false, BreakFlag, NormalBreakTarget);
                         auto Value = Condition(P.Instructions[Part.Test]);
                         Guard.Body.push_back({Kind::Assign, {Match}, "(" + (Part.Invert ? Negate(Value) : Value) + ")"});
                         Out.push_back(std::move(Guard));
@@ -618,11 +719,23 @@ std::vector<Statement> Function::Region(unsigned Start, unsigned End, int BreakT
                     }
                 }
             }
+            // Long compiled branches can target a nearby jump island placed
+            // before the comparison. Its physical address is not a backedge:
+            // the island forwards to the real arm, often far ahead. Resolve
+            // only unconditional jumps, preserving every effectful setup.
+            if (Target <= int(I.Pc))
+            {
+                unsigned Destination = JumpDestination(unsigned(Target));
+                if (Destination > I.Pc)
+                    Target = int(Destination);
+            }
             Statement Branch{Kind::If, {}, std::move(Test)};
             if (!ExitRoute(Target, Branch.Body))
             {
                 if (Target <= int(I.Pc))
-                    throw Unstructured("conditional crosses region");
+                    throw Unstructured("conditional at " + std::to_string(I.Pc) + " -> " + std::to_string(Target) + " crosses region " +
+                                       std::to_string(Start) + ".." + std::to_string(End) + " (break " + std::to_string(BreakTarget) +
+                                       ", continue " + std::to_string(ContinueTarget) + ")");
                 // The lexical false arm is also a valid continuation when paths in the first
                 // arm terminate early. A strict postdominator would move that continuation to
                 // the function exit and duplicate the remainder of the function.
@@ -655,11 +768,12 @@ std::vector<Statement> Function::Region(unsigned Start, unsigned End, int BreakT
                     }
                 if (JoinPc <= I.Pc)
                     throw Unstructured("branch rejoins a loop header at " + std::to_string(I.Pc) + " -> " + std::to_string(JoinPc) +
-                                       " end " + std::to_string(End));
+                                       " in " + std::to_string(Start) + ".." + std::to_string(End));
                 Branch.Text = "not (" + Branch.Text + ")";
-                Branch.Body = Region(Fallthrough, JoinPc, BreakTarget, ContinueTarget, Level + 1);
+                Branch.Body = Region(Fallthrough, JoinPc, BreakTarget, ContinueTarget, Level + 1, false, BreakFlag, NormalBreakTarget);
                 if (JoinPc != unsigned(Target))
-                    Branch.Else = Region(unsigned(Target), JoinPc, BreakTarget, ContinueTarget, Level + 1);
+                    Branch.Else =
+                        Region(unsigned(Target), JoinPc, BreakTarget, ContinueTarget, Level + 1, false, BreakFlag, NormalBreakTarget);
                 Out.push_back(std::move(Branch));
                 Pos = Index(JoinPc);
                 continue;
@@ -673,10 +787,19 @@ std::vector<Statement> Function::Region(unsigned Start, unsigned End, int BreakT
             if (I.Op == LOP_LOADB)
                 Simple(I, Out);
             auto Target = I.Target();
+            if (Target < int(I.Pc))
+            {
+                unsigned Destination = JumpDestination(unsigned(Target));
+                if (Destination > I.Pc)
+                    Target = int(Destination);
+            }
             if (ExitRoute(Target, Out))
                 break;
             if (Target < int(I.Next))
                 throw Unstructured("jump at " + std::to_string(I.Pc) + " -> " + std::to_string(Target) + " crosses region " +
+                                   std::to_string(Start) + ".." + std::to_string(End));
+            if (unsigned(Target) > End)
+                throw Unstructured("jump at " + std::to_string(I.Pc) + " -> " + std::to_string(Target) + " leaves region " +
                                    std::to_string(Start) + ".." + std::to_string(End));
             // CMPPROTO's generic fallback is always valid, independent of runtime-specific proto ids.
             Pos = Index(unsigned(Target));

@@ -59,7 +59,7 @@ struct Options
     std::string LocalPrefix = "Value";
     std::string ArgumentPrefix = "Argument";
     bool ForceStateMachine = false;
-    bool AllowFallback = true;
+    bool AllowFallback = false;
     unsigned OptimizationPasses = 5;
     unsigned MaxNesting = 128;
     std::size_t MaxAnalysisCells = 16000000;

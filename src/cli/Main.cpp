@@ -38,7 +38,7 @@ int main(int Argc, char **Argv)
                              "  --port N                     Bridge port (default: 8877)\n"
                              "  --encoding auto|plain|roblox   Decode opcode bytes (default: auto)\n"
                              "  --disassemble                Print bytecode instructions\n"
-                             "  --state-machine              Force explicit control-flow lowering\n"
+                             "  --state-machine              Opt into forced diagnostic state-machine output\n"
                              "  --indent N                   Spaces per indentation level (1..16)\n"
                              "  --no-header                  Omit generator header\n"
                              "  --no-lines                   Omit function line comments\n"
@@ -66,7 +66,8 @@ int main(int Argc, char **Argv)
                              "  --blank-lines-between-groups N  Group spacing (0..3; default 1)\n"
                              "  --space-inside-table-braces true  Pad inline table braces (default true)\n"
                              "  --optimization-passes N      Simplification passes (0..8; default 5)\n"
-                             "  --no-fallback                Fail if structured output is unavailable\n"
+                             "  --fallback true              Permit diagnostic state-machine output (default false)\n"
+                             "  --no-fallback                Reject state-machine output (default)\n"
                              "  --max-input-bytes N          Input cap (1..268435456)\n"
                              "  --max-output-bytes N         Source cap (1..268435456)\n"
                              "  --max-analysis-cells N       Per-function analysis cap (1..64000000)\n"
@@ -108,6 +109,8 @@ int main(int Argc, char **Argv)
                     Astra::ApplyOption(Settings, "state-machine", Value());
                 else
                     Settings.ForceStateMachine = true;
+                if (Settings.ForceStateMachine)
+                    Settings.AllowFallback = true;
             }
             else if (Arg == "--port")
             {

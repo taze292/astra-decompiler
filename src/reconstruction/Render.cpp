@@ -359,6 +359,8 @@ std::string Function::Generate(bool Main)
         Path.push_back(&List);
         for (const auto &S : List)
         {
+            for (auto U : S.Lifetime)
+                Occur(U);
             for (auto U : Tokens(S.Text))
                 Occur(U);
             for (auto U : S.Left)
@@ -423,6 +425,8 @@ std::string Function::Generate(bool Main)
                         It->second.Last = Position;
                 };
                 for (auto U : Tokens(S.Text))
+                    Use(U);
+                for (auto U : S.Lifetime)
                     Use(U);
                 for (auto U : S.Left)
                     Use(U);
@@ -530,6 +534,8 @@ std::string Function::Generate(bool Main)
                     };
                     for (auto U : Tokens(S.Text))
                         Use(U);
+                    for (auto U : S.Lifetime)
+                        Use(U);
                     for (auto U : S.Left)
                         Use(U);
                     for (const auto &Child : S.Body)
@@ -626,11 +632,13 @@ std::string Function::Generate(bool Main)
     }
     else if (!RecoveredInline && E.Settings.IncludeUpvalueComments && !Upvalues.empty())
     {
-        Out += Pad + "-- Upvalues\n";
+        const auto ContentPad = Indentation(E.Settings, Indent + 1);
+        Out += Pad + "--[[\n" + ContentPad + "Upvalues\n";
         for (unsigned J = 0; J < Upvalues.size(); ++J)
-            Out += Pad + "-- " + (E.Settings.IncludeUpvalueIndexes ? "[" + std::to_string(J + 1) + "] " : "") +
+            Out += ContentPad + (E.Settings.IncludeUpvalueIndexes ? "[" + std::to_string(J + 1) + "] " : "") +
                    (Tokens(Upvalues[J].Value).empty() ? Upvalues[J].Name : Token(Tokens(Upvalues[J].Value).front())) +
                    (Upvalues[J].Reference ? " (ref)\n" : " (copy)\n");
+        Out += Pad + "]]--\n";
         SeparateGroups(Out, E.Settings);
     }
     std::vector<std::string> Hoisted;

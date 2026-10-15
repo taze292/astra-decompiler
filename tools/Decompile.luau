@@ -53,7 +53,7 @@ local DefaultOptions = {
     -- Processing limits
     OptimizationPasses = 5,
     ForceStateMachine = false,
-    AllowFallback = true,
+    AllowFallback = false,
     MaxNesting = 128,
     MaxAnalysisCells = 16000000,
     MaxAnalysisWork = 32000000,
@@ -97,7 +97,7 @@ local IsPreviousBridge = type(Previous) == "table" and Previous.Marker == "Astra
 local Original = if IsPreviousBridge then Previous.Original else PreviousDecompile
 local Bridge = {
     Marker = "AstraBridge1",
-    Version = 7,
+    Version = 8,
     Original = Original,
     Url = Url,
     Connected = false,
@@ -182,12 +182,20 @@ local function QuoteName(Name)
 end
 
 local function RequestOptions(Overrides)
+    -- Clearing either global restores the internal defaults on the next call.
     local CurrentConfig = Environment.AstraConfig
+    local GlobalOptions = Environment.AstraOptions
+    if CurrentConfig == nil then
+        CurrentConfig = {}
+    end
+    if GlobalOptions == nil then
+        GlobalOptions = {}
+    end
     if type(CurrentConfig) ~= "table" then
         error("AstraConfig must be a table")
     end
 
-    if type(Environment.AstraOptions) ~= "table" then
+    if type(GlobalOptions) ~= "table" then
         error("AstraOptions must be a table")
     end
 
@@ -200,7 +208,7 @@ local function RequestOptions(Overrides)
     end
 
     local Options = table.clone(DefaultOptions)
-    for _, Layer in { Environment.AstraOptions, CurrentConfig.Options or {}, Overrides or {} } do
+    for _, Layer in { GlobalOptions, CurrentConfig.Options or {}, Overrides or {} } do
         for Key, Value in Layer do
             Options[Key] = Value
         end
@@ -552,7 +560,13 @@ local function Decompile(Target, Timeout, Overrides)
     local Expression = ""
     local PathStatus = "require lookups disabled"
     if Options.IncludeLineComments and Options.IncludeFunctionLocators and Options.IncludeRequireLocators then
-        Expression, PathStatus = ModulePath(Target)
+        -- A restricted or changing hierarchy must not prevent bytecode recovery.
+        local PathOk, RecoveredPath, Status = pcall(ModulePath, Target)
+        if PathOk then
+            Expression, PathStatus = RecoveredPath, Status
+        else
+            PathStatus = "module path unavailable"
+        end
     end
     local Path = Expression:gsub(".", Hex)
 

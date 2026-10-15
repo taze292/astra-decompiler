@@ -1,6 +1,6 @@
-param([string]$BuildDirectory = "$PSScriptRoot/../build/Release")
+param([string]$BuildDirectory = "$PSScriptRoot/../../build/Release")
 $ErrorActionPreference = 'Stop'
-$ProjectRoot = Split-Path -Parent $PSScriptRoot
+$ProjectRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $ArtifactDirectory = Join-Path $ProjectRoot 'artifacts'
 New-Item -ItemType Directory -Path $ArtifactDirectory -Force | Out-Null
 $Fixture = Join-Path $ProjectRoot 'examples/RobloxFixture.luau'

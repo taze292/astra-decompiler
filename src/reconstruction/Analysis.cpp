@@ -34,6 +34,7 @@ Function::Function(Engine &Owner, unsigned Proto, std::vector<Upvalue> Captures,
                     continue;
                 std::vector<bool> Seen(P.Instructions.size());
                 std::vector<unsigned> Pending(Flow.Successors[J]);
+                std::vector<std::pair<unsigned, unsigned>> OpenBackedges;
                 bool ReadsClosed = false, EffectsAfterClose = false;
                 bool RepeatedCapture = false, WritesWhileOpen = false;
                 while (Safe && !Pending.empty())
@@ -85,13 +86,30 @@ Function::Function(Engine &Owner, unsigned Proto, std::vector<Upvalue> Captures,
                     }
                     if ((Close && WritesRegister) || (ReadsClosed && EffectsAfterClose))
                         Safe = false;
-                    Pending.insert(Pending.end(), Flow.Successors[N].begin(), Flow.Successors[N].end());
+                    if (Capture)
+                        for (unsigned Target : Flow.Successors[N])
+                        {
+                            Pending.push_back(Target);
+                            if (Target <= N)
+                                OpenBackedges.emplace_back(Target, N);
+                        }
+                    else
+                        Pending.insert(Pending.end(), Flow.Successors[N].begin(), Flow.Successors[N].end());
                 }
-                // Repeatedly capturing an unchanged outer local keeps one
-                // shared lexical identity. Reinitialized loop registers without
-                // a close still need a box to avoid inventing fresh upvalues.
+                // A capture without CLOSEUPVALS has one identity across repeat
+                // visits, even when the register is reassigned. Keep its native
+                // declaration outside every open backedge. A close cuts the
+                // traversal, so per-iteration closed locals remain independent.
                 if (RepeatedCapture && WritesWhileOpen)
-                    Safe = false;
+                {
+                    auto &Headers = CaptureLoopHeaders[{J, R}];
+                    E.Analysis.Spend(OpenBackedges.size());
+                    for (const auto &[Header, Tail] : OpenBackedges)
+                        if (Seen[Header] && Flow.Dominates(Header, Tail) && Flow.Dominates(Header, J))
+                            Headers.insert(Header);
+                    if (Headers.empty())
+                        Safe = false;
+                }
             }
             if (Safe)
             {
@@ -280,21 +298,32 @@ void Function::BuildDataflow()
     // Join only the captured value and subsequent writes while that upvalue is
     // open. Earlier values in the same physical register remain independent.
     std::set<unsigned> CapturedDefinitions;
-    for (unsigned J = 0; J < Count; ++J)
-        for (auto [Kind, R] : P.Instructions[J].Captures)
-            if (Kind == LCT_REF && ScalarReferences.count(R) && Visited[J])
+    constexpr unsigned Missing = std::numeric_limits<unsigned>::max();
+    if (!ScalarReferences.empty())
+    {
+        std::vector<std::vector<unsigned>> CaptureSites(P.Stack);
+        for (unsigned J = 0; J < Count; ++J)
+            if (Visited[J])
+                for (auto [Kind, R] : P.Instructions[J].Captures)
+                    if (Kind == LCT_REF && ScalarReferences.count(R))
+                        CaptureSites[R].push_back(J);
+        // Unions connect definitions of one physical register only, so register
+        // groups commute. Reuse a completed traversal only for an already equal
+        // root; a different lifetime or register cannot acquire a cache hit.
+        std::vector<unsigned> ReachedBy(Count, Missing), Pending;
+        for (unsigned R : ScalarReferences)
+            for (unsigned J : CaptureSites[R])
             {
                 unsigned D = (R == P.Instructions[J].A ? WriteSymbols : ReadSymbols)[J][R];
                 CapturedDefinitions.insert(D);
-                std::vector<bool> Seen(Count);
-                std::vector<unsigned> Pending(Flow.Successors[J]);
+                Pending.assign(Flow.Successors[J].begin(), Flow.Successors[J].end());
                 while (!Pending.empty())
                 {
                     unsigned N = Pending.back();
                     Pending.pop_back();
-                    if (N >= Count || Seen[N] || !Visited[N])
+                    if (N >= Count || !Visited[N] || (ReachedBy[N] != Missing && Find(ReachedBy[N]) == Find(D)))
                         continue;
-                    Seen[N] = true;
+                    ReachedBy[N] = D;
                     E.Analysis.Spend(1);
                     const auto &I = P.Instructions[N];
                     if (I.Op == LOP_CLOSEUPVALS && R >= I.A)
@@ -305,7 +334,7 @@ void Function::BuildDataflow()
                     Pending.insert(Pending.end(), Flow.Successors[N].begin(), Flow.Successors[N].end());
                 }
             }
-    constexpr unsigned Missing = std::numeric_limits<unsigned>::max();
+    }
     std::vector<unsigned> RootSymbol(Parent.size(), Missing);
     for (unsigned R = 0; R < P.Stack; ++R)
         if (R < P.Parameters || Cells.count(R))
@@ -353,6 +382,15 @@ void Function::BuildDataflow()
         auto &S = E.Symbols[RootSymbol[Find(D)]];
         S.Keep = true;
         S.ReferenceAlias = true;
+    }
+    for (const auto &[Capture, Headers] : CaptureLoopHeaders)
+    {
+        const auto [J, R] = Capture;
+        if (!ScalarReferences.count(R) || !Visited[J])
+            continue;
+        const unsigned Symbol = (R == P.Instructions[J].A ? WriteSymbols : ReadSymbols)[J][R];
+        for (unsigned Header : Headers)
+            LoopReferenceHoists[P.Instructions[Header].Pc].insert(Symbol);
     }
     if (!E.Settings.UseTypeNames)
         return;

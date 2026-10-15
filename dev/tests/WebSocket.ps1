@@ -102,10 +102,14 @@ try {
     Send-Text $Socket ("92`nASTRA4`nLine`n`n$PascalOptions`n" + $Module.Hex)
     $PascalReply = Receive-Text $Socket
     Check ($PascalReply.StartsWith("92`nok`n") -and $PascalReply.Contains("-- Decompiled with Astra | Bytecode Version:") -and $PascalReply.Contains("`treturn")) 'PascalCase option table/spacing failed'
-    foreach ($Bad in @('{"IncludeHeader":true,"header":false}', '{"ModulePath":"game"}', '{"FilterLineField":"Line"}', '{"MaxAnalysisWork":64000000}', '{"MaxOutputBytes":268435456}', '{"BlankLinesBetweenGroups":4}', '{"compactArrays":true}')) {
+    foreach ($Bad in @('{"IncludeHeader":true,"header":false}', '{"ModulePath":"game"}', '{"FilterLineField":"Line"}', '{"MaxAnalysisWork":64000000}', '{"MaxOutputBytes":268435456}', '{"BlankLinesBetweenGroups":4}', '{"compactArrays":true}', '{"ForceStateMachine":true}')) {
         Send-Text $Socket ("93`nASTRA4`nLine`n`n$Bad`n" + $Small.Hex)
         Check ((Receive-Text $Socket).StartsWith("93`nerror`n")) "Invalid PascalCase/alias options accepted: $Bad"
     }
+    $DiagnosticOptions = '{"ForceStateMachine":true,"AllowFallback":true}'
+    Send-Text $Socket ("94`nASTRA4`nLine`n`n$DiagnosticOptions`n" + $Small.Hex)
+    $DiagnosticReply = Receive-Text $Socket
+    Check ($DiagnosticReply.StartsWith("94`nok`n") -and $DiagnosticReply.Contains('explicit state machine')) 'Explicit diagnostic state-machine request was rejected'
     foreach ($Bad in @('{"header":true,"header":false}', '{"indent":2junk}', '{"indent":02}', '{"unknown":true}', '{"header":false,}', '{"header":false}junk', '{"header":[]}', '{"module-path":"game"}', '{"max-analysis-work":64000000}')) {
         Send-Text $Socket ("91`nASTRA4`nLine`n`n$Bad`n" + $Small.Hex)
         Check ((Receive-Text $Socket).StartsWith("91`nerror`n")) "Invalid JSON options accepted: $Bad"

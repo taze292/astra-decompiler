@@ -6,6 +6,7 @@ local Options = Environment.AstraControlFlowAuditOptions or {
     IncludeUpvalueComments = false,
     IncludeLineComments = false,
     ForceStateMachine = false,
+    AllowFallback = false,
     Casing = "pascal",
     Naming = "inferred",
 }
@@ -14,7 +15,8 @@ local Targets, Seen = {}, {}
 local CoreGui = game:FindFirstChild("CoreGui")
 local CorePackages = game:FindFirstChild("CorePackages")
 local function Add(Target)
-    if Seen[Target] or not (Target:IsA("ModuleScript") or Target:IsA("LocalScript")) then return end
+    local ClientScript = Target:IsA("Script") and Target.RunContext == Enum.RunContext.Client
+    if Seen[Target] or not (Target:IsA("ModuleScript") or Target:IsA("LocalScript") or ClientScript) then return end
     if (CoreGui and Target:IsDescendantOf(CoreGui)) or (CorePackages and Target:IsDescendantOf(CorePackages)) then return end
     Seen[Target] = true
     table.insert(Targets, Target)

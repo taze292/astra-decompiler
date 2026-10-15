@@ -122,14 +122,30 @@ for _, Mode in { "Line", "StartLine", "Both", "Ignored", "Missing", "Hidden" } d
     assert(Bridge.FilterLineField == Expected, "Wrong detected line field for " .. Mode)
     assert(Bridge.LineProbe == (if Mode == "Ignored" or Mode == "Missing" or Mode == "Hidden" then "fallback" else "verified"))
     assert(Environment.decompile(Target) == "return 1")
-    assert(Bridge.Version == 7 and Bridge.Decompile == Environment.decompile)
+    assert(Bridge.Version == 8 and Bridge.Decompile == Environment.decompile)
     assert(Environment.AstraOptions.CompactArrays == true)
     assert(Environment.AstraOptions.IncludeUpvalueIndexes == true)
     assert(Environment.AstraOptions.CompactUpvalues == false)
+    assert(Environment.AstraOptions.AllowFallback == false, "Silent state-machine fallback must be disabled by default")
     assert(Environment.AstraOptions.UseTabs == false)
     assert(Environment.AstraOptions.BlankLinesBetweenGroups == 1)
     assert(Environment.AstraOptions.SpaceInsideTableBraces == true)
     assert(Bridge.LastRequest.Options ~= Environment.AstraOptions, "Request options must be snapshots")
+    local InternalDefaults = table.clone(Bridge.LastRequest.Options)
+    local InitialConfig, InitialOptions = Environment.AstraConfig, Environment.AstraOptions
+    Environment.AstraConfig, Environment.AstraOptions = nil, nil
+    assert(Environment.decompile(Target) == "return 1", "Clearing global settings lost the internal defaults")
+    for Key, Value in InternalDefaults do
+        assert(Bridge.LastRequest.Options[Key] == Value, "Missing global setting lost its default: " .. Key)
+    end
+    assert(Environment.decompile(Target, { CompactArrays = false }) == "return 1")
+    assert(Bridge.LastRequest.Options.CompactArrays == false and Bridge.LastRequest.Options.Casing == "pascal",
+        "Per-call overrides did not layer over missing global settings")
+    Environment.AstraConfig = false
+    assert(Environment.decompile(Target) == nil, "Invalid config was silently treated as missing")
+    Environment.AstraConfig, Environment.AstraOptions = InitialConfig, false
+    assert(Environment.decompile(Target) == nil, "Invalid options were silently treated as missing")
+    Environment.AstraOptions = InitialOptions
     assert(Environment.decompile({}) == nil, "Invalid targets must exit silently")
     assert(Environment.decompile(Target, 0) == nil, "Invalid timeouts must exit silently")
     assert(Environment.decompile(Target, 0/0) == nil, "NaN timeout must be rejected")
@@ -170,6 +186,13 @@ for _, Mode in { "Line", "StartLine", "Both", "Ignored", "Missing", "Hidden" } d
     Deep.GetChildren = function(self) local Result=Children(self) table.insert(Result, { Name="Unique" }) return Result end
     assert(Environment.decompile(Unique) == "return 1")
     assert(Bridge.LastRequest.ModulePath == "", "Duplicate siblings must suppress require locators")
+    Deep.GetChildren = function() error("mock hierarchy access denied") end
+    assert(Environment.decompile(Unique) == "return 1", "Unavailable module metadata prevented decompilation")
+    assert(Bridge.LastRequest.ModulePath == "" and Bridge.LastRequest.PathStatus == "module path unavailable")
+    assert(Bridge.LastRequest.Options.IncludeGcLocators == true, "Missing require metadata disabled GC locators")
+    assert(Environment.decompile(Unique, { IncludeGcLocators = false }) == "return 1")
+    assert(Bridge.LastRequest.ModulePath == "" and Bridge.LastRequest.Options.IncludeGcLocators == false,
+        "Unavailable module metadata overrode disabled GC locators")
     Deep.GetChildren = Children
     local Detached = Instance("Detached", "ModuleScript")
     Detached.Bytecode = Target.Bytecode
@@ -178,6 +201,10 @@ for _, Mode in { "Line", "StartLine", "Both", "Ignored", "Missing", "Hidden" } d
     Target.Class = "LocalScript"
     assert(Environment.decompile(Target) == "return 1")
     assert(Environment.Message:find("\n" .. Expected .. "\n\n", 1, true))
+    Target.Class, Target.RunContext = "Script", "Client"
+    assert(Environment.decompile(Target) == "return 1", "A Script using client RunContext was rejected")
+    assert(Bridge.LastRequest.ModulePath == "" and Bridge.LastRequest.PathStatus == "not a ModuleScript")
+    Target.RunContext = nil
     Target.Class = "CoreScript"
     assert(Environment.decompile(Target) == "return 1", "Documented client-visible CoreScript bytecode was rejected")
     Target.Class = "ModuleScript"

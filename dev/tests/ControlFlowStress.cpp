@@ -3,6 +3,7 @@
 #include "Luau/BytecodeBuilder.h"
 #include "Luau/Compiler.h"
 #include "NumericCoercionCases.hpp"
+#include "ObfuscatedFlowCases.hpp"
 #include "OptimizerCases.hpp"
 #include "PredicateDagCases.hpp"
 #include "ScopeCases.hpp"
@@ -589,6 +590,8 @@ return n,values()
         Result.push_back({Name, Source});
     for (auto &[Name, Source] : ScopeCases())
         Result.push_back({std::move(Name), std::move(Source)});
+    for (auto &[Name, Source] : ObfuscatedCaptureCases())
+        Result.push_back({std::move(Name), std::move(Source)});
 
     // Deterministic generated cases combine loop-carried phi values, tables,
     // early exits and several CFG shapes. Constants vary without relying on
@@ -884,6 +887,11 @@ int main(int Argc, char **Argv)
         {"bytecode_loop_capture_without_close", "3:1:3;3:1:3;3:1:3;"},
     };
     auto Corpus = Fixtures();
+    for (auto &Fixture : ObfuscatedJumpIslandCases())
+    {
+        RawExpected.emplace(Fixture.Name, Fixture.Expected);
+        Corpus.push_back({Fixture.Name, Fixture.Bytes, true});
+    }
     for (auto &Fixture : ThreadedLoopCases())
     {
         RawExpected.emplace(Fixture.Name, Fixture.Expected);
@@ -932,6 +940,9 @@ int main(int Argc, char **Argv)
                     Options.IncludeFunctionLocators = false;
                     Options.OptimizationPasses = Mode % 3 == 0 ? 0 : 5;
                     Options.ForceStateMachine = Mode % 3 == 2;
+                    // Irregular handcrafted VM fixtures intentionally exercise
+                    // the diagnostic lowering path; source fixtures stay strict.
+                    Options.AllowFallback = Fixture.Serialized || Options.ForceStateMachine;
                     Options.NativeCaptures = Mode < 3;
                     Options.UseTabs = Mode % 2 != 0;
                     Options.IndentWidth = Mode % 3 == 2 ? 2 : 4;
@@ -942,6 +953,21 @@ int main(int Argc, char **Argv)
                         Source = Result.Source;
                         if (!Options.ForceStateMachine)
                             (Fixture.Serialized ? RawFallbacks : SourceFallbacks) += unsigned(Result.StateMachineFunctions);
+                        if (Mode == 0 && Result.StateMachineFunctions != 0)
+                        {
+                            auto Strict = Options;
+                            Strict.AllowFallback = false;
+                            bool Rejected = false;
+                            try
+                            {
+                                Astra::Decompile(Input, Strict);
+                            }
+                            catch (const Astra::Error &Failure)
+                            {
+                                Rejected = std::string(Failure.what()).find("structuring failed") != std::string::npos;
+                            }
+                            Check(Rejected, "Strict mode silently accepted a diagnostic-only control-flow shape");
+                        }
                         if (!Options.ForceStateMachine &&
                             (Fixture.Name.starts_with("long_") || Fixture.Name.starts_with("universal_") ||
                              Fixture.Name == "loader_closed_captures_then_reused_loop_registers" ||
@@ -951,6 +977,12 @@ int main(int Argc, char **Argv)
                             Check(Result.StateMachineFunctions == 0, "A regular boolean chain required state-machine fallback");
                         if (!Options.ForceStateMachine && Fixture.Name == "loader_shared_counter_callbacks")
                             Check(Source.find("[1] }") == std::string::npos, "Shared outer counter retained a reference box");
+                        if (Options.NativeCaptures && !Options.ForceStateMachine &&
+                            (Fixture.Name == "universal_open_captures_share_loop_identity" ||
+                             Fixture.Name == "universal_closed_outer_open_inner_captures" ||
+                             Fixture.Name == "universal_literal_prefix_before_open_capture"))
+                            Check(Source.find("[1] }") == std::string::npos,
+                                  "A proven open capture lifetime still boxed unrelated register values");
                         if (!Options.ForceStateMachine &&
                             (Fixture.Name == "open_method_nil_holes" || Fixture.Name == "open_method_zero_results" ||
                              Fixture.Name == "open_method_nested_results" || Fixture.Name == "open_method_forward_varargs"))

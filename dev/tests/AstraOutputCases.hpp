@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../src/Reconstruction.hpp"
+#include "Reconstruction.hpp"
 #include "Luau/Compiler.h"
 
 #include <string>
@@ -118,12 +118,12 @@ return X,Y,Last,"{ ignore }"
     Settings.IncludeHeader = false;
     Settings.IncludeLineComments = false;
     auto Comments = Astra::Decompile(Captures, Settings).Source;
-    Check(Comments.find("-- Upvalues\n") != std::string::npos && Comments.find("-- [1] ") != std::string::npos &&
-              Comments.find("-- [2] ") != std::string::npos && Comments.find(" (copy)") != std::string::npos &&
+    Check(Comments.find("Upvalues\n") != std::string::npos && Comments.find("[1] ") != std::string::npos &&
+              Comments.find("[2] ") != std::string::npos && Comments.find(" (copy)") != std::string::npos &&
               Comments.find(" (ref)") != std::string::npos && Comments.find("(type ") == std::string::npos,
           "Default upvalue comments do not use indexed copy/ref lines");
     Settings.IncludeUpvalueIndexes = false;
-    Check(Astra::Decompile(Captures, Settings).Source.find("-- [1] ") == std::string::npos,
+    Check(Astra::Decompile(Captures, Settings).Source.find("[1] ") == std::string::npos,
           "Upvalue indexes cannot be disabled independently");
     const auto Nested = Luau::compile(
         "local function f(x) if x then return function(y) if y then return '    {keep}' end return 'other' end end return f end return "

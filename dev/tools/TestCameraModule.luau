@@ -38,7 +38,7 @@ local Ok, Failure = pcall(function()
     })
     assert(not Clean:find("filtergc", 1, true) and not Clean:find("-- Line:", 1, true))
     Check({ OptimizationPasses = 0 })
-    Check({ ForceStateMachine = true })
+    Check({ ForceStateMachine = true, AllowFallback = true })
     local NoGc = Check({ IncludeGcLocators = false })
     assert(not NoGc:find(" | filtergc(", 1, true))
     for _, Options in {

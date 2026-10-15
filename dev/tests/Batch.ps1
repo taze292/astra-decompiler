@@ -26,4 +26,8 @@ if ($LASTEXITCODE -ne 1 -or (Test-Path "$OutputDirectory/collision")) { throw 'C
 if ($LASTEXITCODE -ne 1 -or (Test-Path "$OutputDirectory/invalid.luau")) { throw 'Invalid option created output' }
 & $Executable --header false --batch --output-dir "$OutputDirectory/nested" --jobs 33 $One
 if ($LASTEXITCODE -ne 1) { throw 'Unbounded worker count accepted' }
-Write-Output '7 batch CLI checks passed'
+& $Executable --header false --state-machine $One -o "$OutputDirectory/diagnostic.luau"
+if ($LASTEXITCODE -or -not ([IO.File]::ReadAllText("$OutputDirectory/diagnostic.luau")).Contains('explicit state machine')) { throw 'Explicit state-machine diagnostics did not opt in' }
+& $Executable --state-machine --no-fallback $One -o "$OutputDirectory/conflicting.luau"
+if ($LASTEXITCODE -ne 1 -or (Test-Path "$OutputDirectory/conflicting.luau")) { throw 'Conflicting state-machine policy was accepted' }
+Write-Output '9 batch CLI checks passed'

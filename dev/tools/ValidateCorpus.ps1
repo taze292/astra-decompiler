@@ -1,7 +1,7 @@
 param(
-    [string]$BuildDirectory = "$PSScriptRoot/../build/Release",
-    [string]$Source = "$PSScriptRoot/../CameraModule.luau",
-    [string]$OutputDirectory = "$PSScriptRoot/../artifacts/rewrite/source-corpus",
+    [string]$BuildDirectory = "$PSScriptRoot/../../build/Release",
+    [string]$Source = "$PSScriptRoot/../../CameraModule.luau",
+    [string]$OutputDirectory = "$PSScriptRoot/../../artifacts/rewrite/source-corpus",
     [string]$BaselineDirectory = '',
     [ValidateRange(5, 100000)][int]$Samples = 100,
     [switch]$RequireIdentical

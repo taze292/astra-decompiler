@@ -56,6 +56,9 @@ struct Statement
     std::string Text;
     std::vector<Statement> Body, Else;
     bool Pure = false, Call = false;
+    // Captured identities that must be declared outside this repeated region.
+    // These are lexical lifetime constraints, not reads or writes in the VM.
+    std::vector<unsigned> Lifetime;
     Statement(Kind K = Kind::Raw, std::vector<unsigned> L = {}, std::string T = {}, std::vector<Statement> B = {},
               std::vector<Statement> Other = {}, bool P = false, bool C = false)
         : Type(K), Left(std::move(L)), Text(std::move(T)), Body(std::move(B)), Else(std::move(Other)), Pure(P), Call(C)
@@ -105,6 +108,8 @@ class Function
     bool HasCopyCaptures = false;
     std::set<unsigned> Cells;
     std::set<unsigned> ScalarReferences;
+    std::map<std::pair<unsigned, unsigned>, std::set<unsigned>> CaptureLoopHeaders;
+    std::map<unsigned, std::set<unsigned>> LoopReferenceHoists;
     std::vector<Statement> Prefix;
     unsigned PackSymbol, TopSymbol, VarargsSymbol;
     bool NeedsPack = false, NeedsVarargs = false, NeedsDynamicTop = false;
@@ -122,7 +127,7 @@ class Function
     unsigned LoopTail(const Instruction &I) const;
     unsigned JumpDestination(unsigned Pc) const;
     bool EquivalentExit(unsigned Left, unsigned Right) const;
-    unsigned LoopContinuation(unsigned Head, unsigned Tail, unsigned Limit, std::vector<Statement> &Before);
+    unsigned LoopContinuation(unsigned Head, unsigned Tail, unsigned Limit, std::vector<Statement> &Before, bool &GuardDefault);
     bool PredicateRegion(unsigned Pos, unsigned Limit, unsigned &LastTest, unsigned &Fallthrough, int &Target, std::string &Test);
     std::map<const std::vector<Statement> *, std::set<unsigned>> ScopedDeclarations;
     void BuildDataflow();
@@ -139,7 +144,8 @@ class Function
     void Simple(const Instruction &I, std::vector<Statement> &Out);
     std::string Condition(const Instruction &I) const;
     std::vector<Statement> Region(unsigned Start, unsigned End, int BreakTarget = -1, int ContinueTarget = -1, unsigned Level = 0,
-                                  bool IgnoreBackedge = false);
+                                  bool IgnoreBackedge = false, unsigned BreakFlag = std::numeric_limits<unsigned>::max(),
+                                  int NormalBreakTarget = -1);
     std::vector<Statement> StateMachine(std::string_view Reason);
     std::string Closure(const Instruction &I, std::vector<Statement> &Out);
     unsigned Index(unsigned Pc) const;

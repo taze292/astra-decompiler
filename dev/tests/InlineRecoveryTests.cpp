@@ -187,6 +187,7 @@ int main()
                         {
                             Astra::Options Settings;
                             Settings.ForceStateMachine = Machine;
+                            Settings.AllowFallback = Machine;
                             Settings.OptimizationPasses = Passes;
                             Settings.IncludeHeader = false;
                             Settings.IncludeFunctionLocators = false;
@@ -207,6 +208,7 @@ int main()
                     Astra::Options Settings;
                     Settings.IncludeHeader = false;
                     Settings.ForceStateMachine = Machine;
+                    Settings.AllowFallback = Machine;
                     Settings.CompactUpvalues = Compact;
                     Settings.IncludeLineComments = Comments;
                     Settings.IncludeUpvalueComments = Comments;
@@ -216,7 +218,7 @@ int main()
                     if (Position == std::string::npos || Output.Source.find(Marker, Position + 1) != std::string::npos)
                         throw std::runtime_error("Recovered function must have exactly one provenance comment:\n" + Output.Source);
                     ++Checks;
-                    if (Output.Source.find("-- Upvalues") != std::string::npos ||
+                    if (Output.Source.find("Upvalues") != std::string::npos ||
                         Output.Source.substr(Position, Output.Source.find('\n', Position) - Position) != Marker)
                         throw std::runtime_error("Recovered function retained ordinary metadata comments:\n" + Output.Source);
                     ++Checks;

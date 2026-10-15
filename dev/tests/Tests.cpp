@@ -173,6 +173,7 @@ int main()
                         auto Expected = Execute(Original);
                         Astra::Options Settings;
                         Settings.ForceStateMachine = StateMachine;
+                        Settings.AllowFallback = StateMachine;
                         auto Result = Astra::Decompile(Original, Settings);
                         Generated = Result.Source;
                         if (Generated.find(';') != std::string::npos)
@@ -248,6 +249,7 @@ int main()
                     Astra::Options O;
                     O.NativeCaptures = Native;
                     O.ForceStateMachine = Machine;
+                    O.AllowFallback = Machine;
                     Check(Execute(Luau::compile(Astra::Decompile(Input, O).Source)) == Execute(Input),
                           "Closed reference lost its detached value");
                 }
@@ -274,7 +276,7 @@ int main()
                                         Lookup);
         Check(Execute(LookupTest) == Execute(Luau::compile("return 'Probe',2,nil")),
               "Named locator should use the original name and line without constants");
-        Check(Source.find("-- [1] Shared (copy)") != std::string::npos, "Missing default numbered Upvalues comment");
+        Check(Source.find("[1] Shared (copy)") != std::string::npos, "Missing default numbered Upvalues comment");
         Check(Source.find("local First = Input.Name\n    local Second = Input.Value\n\n    Input.Value = First") != std::string::npos,
               "Consecutive locals were not grouped and separated from writes");
         Check(Source.find("\n\n    return ") != std::string::npos, "Missing return separation");
@@ -289,7 +291,7 @@ int main()
         Check(Astra::Decompile(Bytecode, Settings).Source.find("filtergc(") == std::string::npos,
               "Disabled line comments emitted a locator");
         Settings.IncludeUpvalueComments = false;
-        Check(Astra::Decompile(Bytecode, Settings).Source.find("-- Upvalues") == std::string::npos,
+        Check(Astra::Decompile(Bytecode, Settings).Source.find("Upvalues") == std::string::npos,
               "Disabled upvalue comments emitted a label");
         Compile.debugLevel = 0;
         auto Stripped = Astra::Decompile(Luau::compile(StyleSource, Compile)).Source;
@@ -330,7 +332,7 @@ int main()
                 throw std::runtime_error("Cannot read bridge fixture: " + Path);
             return std::string(std::istreambuf_iterator<char>(In), {});
         };
-        auto Harness = Read(std::string(ASTRA_SOURCE_DIR) + "/tests/BridgeHarness.luau");
+        auto Harness = Read(std::string(ASTRA_SOURCE_DIR) + "/dev/tests/BridgeHarness.luau");
         auto Bridge = Read(std::string(ASTRA_SOURCE_DIR) + "/tools/Decompile.luau");
         auto Marker = Harness.find("--!BRIDGE_SOURCE!");
         Harness.replace(Marker, std::string("--!BRIDGE_SOURCE!").size(), Bridge);

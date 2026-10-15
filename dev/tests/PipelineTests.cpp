@@ -2,6 +2,7 @@
 #include "AstraOutputCases.hpp"
 #include "Luau/Compiler.h"
 #include "TerminalLoopCases.hpp"
+#include "UpvalueBlockCases.hpp"
 #include "lua.h"
 #include "lualib.h"
 #include <functional>
@@ -70,8 +71,10 @@ int main()
 {
     try
     {
+        Check(!Astra::Options{}.AllowFallback, "State-machine output must require an explicit opt-in");
         RunAstraOutputCases(Check, Execute);
         RunTerminalLoopCases(Check);
+        RunUpvalueBlockCases(Check, Execute);
         const char *Source = R"(
 local HTTPServer = 3
 local user_value = 5
@@ -110,6 +113,7 @@ return answer, text, count, x, y, recurse(5), string.upper("literal"), callbacks
                                     S.PreserveFunctionNames = Preserve;
                                     S.OptimizationPasses = Passes;
                                     S.ForceStateMachine = Machine;
+                                    S.AllowFallback = Machine;
                                     auto Actual = Astra::Decompile(Bytes, S);
                                     try
                                     {
@@ -150,6 +154,7 @@ return answer, text, count, x, y, recurse(5), string.upper("literal"), callbacks
                             Astra::Options O;
                             O.NativeCaptures = Native;
                             O.ForceStateMachine = Machine;
+                            O.AllowFallback = Machine;
                             auto Output = Astra::Decompile(Input, O);
                             Check(Execute(Luau::compile(Output.Source)) == Execute(Input), "Capture/method regression: " + Output.Source);
                         }
