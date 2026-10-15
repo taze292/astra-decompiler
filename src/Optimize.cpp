@@ -166,6 +166,11 @@ bool Function::Optimize(std::vector<Statement> &Nodes)
                     {
                         for (std::size_t J = N + 1; J < End; ++J)
                             Replace(Nodes[J].Text, Token(S.Left[0]), Token(From.front()));
+                        // The original copy read its source once; its expanded
+                        // uses now read it Uses times. Later rewrites in this
+                        // pass can revisit the source, so stale counts could
+                        // remove its definition while other uses still exist.
+                        Reads[From.front()] += Uses - 1;
                         Changed = true;
                         Nodes.erase(Nodes.begin() + std::ptrdiff_t(N));
                         continue;
@@ -289,37 +294,68 @@ bool Function::Optimize(std::vector<Statement> &Nodes)
                     for (auto Dependency : Tokens(S.Text))
                         if (E.Symbols[Dependency].Cell || E.Symbols[Dependency].ReferenceAlias)
                             CanReorder = false;
-                    bool Ordered = CanReorder || BeforeUse.find_first_of(")[.:+-*/%^#") == std::string::npos;
-                    // Reading a native captured local has no effects. It can move
-                    // past evaluation of bare locals/literals before the first
-                    // arithmetic operator is applied, but never across a property,
-                    // call, or completed parenthesized expression (metamethods).
-                    if (!Ordered)
-                    {
-                        auto ValueTokens = Tokens(S.Text);
-                        if (ValueTokens.size() == 1 && S.Text == Token(ValueTokens.front()) && !E.Symbols[ValueTokens.front()].Cell &&
-                            BeforeUse.find_first_of(")[.:") == std::string::npos)
-                            Ordered = true;
-                    }
                     auto PrefixSymbols = Tokens(BeforeUse);
-                    // Moving an effectful expression past reads of immutable
-                    // locals and numeric literals preserves evaluation order.
-                    // Reject completed operations/property access/calls in the
-                    // prefix; they may invoke metamethods or mutate captures.
-                    if (!Ordered)
+                    // A substitution moves the RHS after everything preceding
+                    // its use. Earlier locals must be immutable if the RHS can
+                    // mutate captures. Completed operations can invoke
+                    // metamethods, and and/or/if can skip the RHS entirely.
+                    // Inspect syntax rather than a character blacklist: a bare
+                    // global read or `local and value` has no punctuation.
+                    bool Ordered = CanReorder;
+                    if (!CanReorder)
                     {
-                        auto PrefixText = BeforeUse;
-                        bool StablePrefix = true;
+                        Ordered = true;
                         for (auto U : PrefixSymbols)
                         {
                             const auto &Symbol = E.Symbols[U];
-                            StablePrefix &= !Symbol.Cell && !Symbol.ReferenceAlias && WritesCount[U] <= 1;
-                            Replace(PrefixText, Token(U), "0");
+                            Ordered &= !Symbol.Cell && (S.Pure || (!Symbol.ReferenceAlias && WritesCount[U] <= 1));
                         }
-                        if (StablePrefix && PrefixText.find_first_not_of(" (=,+-*/%^0123456789") == std::string::npos)
-                            Ordered = true;
+                        for (std::size_t P = 0; Ordered && P < BeforeUse.size();)
+                        {
+                            auto C = static_cast<unsigned char>(BeforeUse[P]);
+                            if (C == '\x1f')
+                            {
+                                P = BeforeUse.find('\x1e', P) + 1;
+                            }
+                            else if (C == '\'' || C == '"')
+                            {
+                                auto Quote = C;
+                                ++P;
+                                while (P < BeforeUse.size() && BeforeUse[P] != Quote)
+                                {
+                                    if (BeforeUse[P] == '\\')
+                                        ++P;
+                                    ++P;
+                                }
+                                Ordered = P < BeforeUse.size();
+                                ++P;
+                            }
+                            else if (std::isdigit(C))
+                            {
+                                // Constants are emitted as decimal/hex numeric
+                                // literals. Their evaluation has no effects.
+                                ++P;
+                                while (P < BeforeUse.size() &&
+                                       (std::isalnum(static_cast<unsigned char>(BeforeUse[P])) || BeforeUse[P] == '.'))
+                                    ++P;
+                            }
+                            else if (std::isalpha(C) || C == '_')
+                            {
+                                auto Start = P++;
+                                while (P < BeforeUse.size() &&
+                                       (std::isalnum(static_cast<unsigned char>(BeforeUse[P])) || BeforeUse[P] == '_'))
+                                    ++P;
+                                auto Word = BeforeUse.substr(Start, P - Start);
+                                Ordered = Word == "return" || Word == "not" || Word == "nil" || Word == "true" || Word == "false";
+                            }
+                            else if (std::isspace(C) || std::string_view("(,+-*/%^#<>=~").find(char(C)) != std::string_view::npos)
+                                ++P;
+                            else
+                                Ordered = false;
+                        }
                     }
-                    if (PrefixSymbols.size() == 1 && !E.Symbols[PrefixSymbols[0]].Cell && BeforeUse.starts_with(Token(PrefixSymbols[0])))
+                    if (PrefixSymbols.size() == 1 && !E.Symbols[PrefixSymbols[0]].Cell && !E.Symbols[PrefixSymbols[0]].ReferenceAlias &&
+                        WritesCount[PrefixSymbols[0]] <= 1 && BeforeUse.starts_with(Token(PrefixSymbols[0])))
                     {
                         auto Tail = BeforeUse.substr(Token(PrefixSymbols[0]).size());
                         // Assigning a constant field on a stable local has no effect before the RHS is evaluated.

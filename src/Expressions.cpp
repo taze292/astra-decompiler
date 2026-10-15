@@ -223,6 +223,18 @@ std::string CleanExpression(std::string Text)
         }
         if (Text[Pos] != '(')
             continue;
+        // Only grouping parentheses can be removed. Parentheses following an
+        // identifier, source-symbol token, or suffix expression are call
+        // arguments: `object:method(argument).field` must keep them.
+        auto Previous = Pos;
+        while (Previous && std::isspace(static_cast<unsigned char>(Text[Previous - 1])))
+            --Previous;
+        if (Previous)
+        {
+            auto C = static_cast<unsigned char>(Text[Previous - 1]);
+            if (std::isalnum(C) || C == '_' || C == '\x1e' || C == ')' || C == ']')
+                continue;
+        }
         auto End = Closing(Text, Pos);
         if (End == std::string::npos || End + 1 == Text.size())
             continue;
