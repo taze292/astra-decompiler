@@ -1,5 +1,37 @@
 # Validation record
 
+## Current local 0.3.0 rewrite — 2026-10-14
+
+This section describes the current checkout. Sections below it preserve older release/session evidence and their historical counts.
+
+- Release build: ClangCL 22.1.3, Windows SDK 10.0.26100; all four CTest suites pass.
+- Existing semantic/format/version suite: **1,593 passed, 0 failed**.
+- New pipeline suite: **1,433 passed, 0 failed**, covering 576 combinations of casing/naming/type names/function spelling/pass count/debug/state-machine mode, plus locator interactions, strict option errors, resource caps, statistics, serial/parallel ordering and failures, and 512 deterministic byte mutations. Mutated bytecode is never executed.
+- WebSocket suite: **30 checks**, retaining legacy/TAZE2 behavior and adding TAZE3 options, bad/duplicate/reserved keys, cap escalation rejection, per-request output limits, and recovery without settings leakage.
+- Batch CLI: **7 checks** for ordered mixed success/failure, identical results, overwrite policy, preflight collisions, invalid options, and worker caps.
+- Bridge mocks cover all six line-probe modes, cached function restoration, configuration overlay isolation, error inspection/raising, lazy probing, NaN timeouts, pending limits, and timeout recovery.
+
+The four principal benchmark inputs retain byte-identical default output with zero fallback functions. All six compiled variants of the supplied CameraModule source recompile with fallback disabled. Three debug-rich variants have one intentional capture-binding rename (`PropertyName2Capture` → `PropertyNameCapture2`); references and capture comments change consistently. See [performance measurements and reproduction](PERFORMANCE.md).
+
+### Final live MCP validation
+
+- Client: `0.743.0.7431129`, Baseplate.
+- Selected path: `game.StarterPlayer.PlayerModule.CameraModule`.
+- Bytecode: **13,112 bytes**, version **14**, type metadata **3**.
+- Final bridge: **v5**, verified **StartLine** filter key, connected to the locally built server.
+- Default source: **28,079 bytes**, **30 GC lookups**, **0 require lookups**; local reconstruction of the captured input has **0 fallback functions**.
+- **17** source variants compiled in Roblox, covering every casing/naming pair, disabled comments, zero simplification passes, forced state-machine output, and GC suppression.
+- **4** concurrent requests returned byte-identical default source. Invalid request options failed without affecting the next valid request.
+- All **30** GC expressions compiled/evaluated without error; **28** matched live functions and **2** anonymous prototypes (lines 609/612) returned no function in this session. Lookup metadata does not guarantee a matching live closure.
+- The project behavioral fixture executed before/after decompilation with identical results: `TazeTestResult.Passed = true`.
+- Final server restart, reconnection, and bridge reinstallation succeeded. The final local server and bridge were left available for use.
+
+CameraModule was compiled, not executed or substituted for the camera controller. Its 17 compile checks do not establish complete behavior equivalence. Behavioral assertions apply to executable regression fixtures. The live results are in `TazeRewriteValidation`; bytecode, generated source, measurements, and server logs remain ignored under `artifacts/rewrite/`.
+
+The initial architecture-only commit produced identical output before optimizations were introduced. The final rewrite retains its conservative semantic transformations and fallback; the measured gains come from data structures, graph reuse, final source expansion, deferred naming, and independent chunk concurrency. No claim of universal optimality or support for every Luau program is made.
+
+## Historical validation
+
 The final Windows Release build used ClangCL 22.1.3, CMake, and the installed Windows SDK.
 
 `build/Release/taze-tests.exe` reports **1,593 passed, 0 failed**, and CTest passes against the current Luau snapshot. These are individual fixture/configuration, metadata and input-validation checks, not distinct source programs. The suite compares execution results across 55 behavioral fixtures, optimization levels 0–2, stripped/full debug data, structured/fallback emission, versions 9 and 11–14, and plain/Roblox opcode encodings. A dedicated v12/v13 feature-boundary check exercises float and double vector constants rather than changing only the serialized version byte.

@@ -115,3 +115,11 @@ Use the same Release compiler/runtime for baseline and rewritten benchmark binar
 Behavior tests compile source, decompile bytecode, compile generated source, and compare VM results. Formatting checks supplement these tests; they do not substitute for them. Invalid/truncated input tests and deterministic mutation stress exercise rejection paths. Test output caps during expansion, option numeric overflow, unknown options, batch error isolation, and no cross-request state leakage.
 
 Live validation uses only the selected CameraModule and project fixtures. Compile CameraModule output without replacing or invoking the running controller. Validate locator matches where the session has live matching functions; report absent matches separately from compile failures.
+
+## Completion record
+
+All seven milestones were implemented and validated locally. The final pipeline retains the tested semantic lowering while replacing its organization, finalization, indexing, naming allocation, configuration, and independent-input scheduling. Measurements and remaining limits are recorded in [PERFORMANCE.md](PERFORMANCE.md) and [VALIDATION.md](VALIDATION.md); every setting is listed in [OPTIONS.md](OPTIONS.md).
+
+One reviewed presentation change followed removal of provisional naming allocations: three debug-rich CameraModule source variants use `PropertyNameCapture2` instead of `PropertyName2Capture`. All references/comments agree, all six variants compile without fallback, and captured-loop behavior is covered by the configuration matrix. The captured live module and other principal benchmark outputs remain identical. Parallelism was implemented across independent chunks because nested closure reconstruction shares capture/naming state. No result cache or speculative parallel closure lowering was added.
+
+All work is in local commits; no push or release was performed.
