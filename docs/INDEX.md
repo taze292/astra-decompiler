@@ -1,17 +1,18 @@
 # Introduction
 
-Astra turns Luau bytecode into readable source. Run it locally through a Roblox executor, use the CLI for files, or integrate the C++ library.
+Astra turns Luau bytecode into readable source. Download the Windows release, start the local server, and connect your executor. No compiler or build tools are needed.
 
 ## Start here
 
-- [Set up Astra](GETTING_STARTED.md): build, start the server, and install the bridge.
+- [Install Astra](GETTING_STARTED.md): download, start the server, and install the bridge.
 - [Customize output](CUSTOMIZATION.md): names, comments, arrays, and spacing.
-- [Choose a setup](SETUPS.md): Roblox, individual files, batches, or C++.
+- [Use the CLI](SETUPS.md): individual bytecode files, batches, and integrations.
 - [Browse every option](OPTIONS.md): defaults, accepted values, and limits.
+- [Build from source](BUILDING.md): compile Astra yourself when you need to.
 
 ## A local workflow
 
-Start `astra.exe --serve`, execute `tools/Decompile.luau`, then call `decompile(SomeScript)`. The bridge sends bytecode to your loopback server and returns generated Luau. Neither the bridge nor the server executes the decompiled source.
+Start `Start-Decompiler.cmd` from the extracted release and execute its included `Decompile.luau` in your executor. The bridge sends bytecode to your local server and returns generated Luau. Astra does not execute the recovered source.
 
 ```luau
 local Source = decompile(SomeScript, {
@@ -25,8 +26,8 @@ local Source = decompile(SomeScript, {
 
 Options live in `getgenv().AstraOptions`. Edit the readable table in the bridge or replace it between requests. Each call can override individual settings, and omitted settings use the internal defaults.
 
-See the [customization guide](CUSTOMIZATION.md) for examples. If you are upgrading from an older bridge, read the [migration notes](ASTRA_MIGRATION.md).
+See the [customization guide](CUSTOMIZATION.md) for examples.
 
-## Working on Astra
+## Need a hand?
 
-The [developer guide](../dev/README.md) explains the source tree and test commands. The [architecture](ARCHITECTURE.md) describes the pipeline, and [Astra 0.5 control-flow validation](OBFUSCATED_CONTROL_FLOW.md) records the current fixes and measurements. Earlier performance and design reports remain under Developer notes as dated snapshots.
+Check the [installation troubleshooting](GETTING_STARTED.md#troubleshooting), or [join Discord](https://discord.gg/FjUbXtdCzU).

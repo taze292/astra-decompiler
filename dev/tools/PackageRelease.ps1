@@ -23,7 +23,7 @@ pause
 @'
 # Astra Decompiler v__ASTRA_VERSION__
 
-Windows x64. [Documentation](https://taze292.github.io/astra-decompiler/)
+Windows x64. [Documentation](https://taze292.github.io/astra-decompiler/docs.html)
 
 1. Extract all files from the ZIP.
 2. Run `Start-Decompiler.cmd`, or run `astra.exe --serve`.

@@ -11,17 +11,20 @@ Open `http://localhost:8000`. Rebuild and reload after changing source. Generate
 
 ## Content and navigation
 
-`docs/INDEX.md` is the homepage. Every `docs/*.md` document, the root README, the developer README, and third-party notices are built. Primary guides appear under Essentials and Reference; the developer guide, current validation, and historical reports stay under collapsed Developer notes. Add primary page names to the grouping in `build.py`; other new documents are included automatically.
+`site/landing.html` is the landing page at `index.html`; `docs/INDEX.md` is the documentation introduction at `docs.html`. The public site publishes only the six user guides listed in `PUBLIC_DOCUMENTS` in `build.py`. Repository-only developer reports, publishing instructions, migration history, and README files are excluded from both output and search. Previously generated private routes are removed when rebuilding an existing output directory.
 
 Supported Markdown includes headings, paragraphs, fenced code, tables, nested lists, quotes, inline code, links, images, bold, and italic. This covers the GFM used by the repository. Raw HTML and source snippets are escaped, never executed.
 
 ## Theme and assets
 
 - `styles.css`: Astra's dark responsive layout, print styles, and reduced-motion support.
+- `landing.html`: a lightweight home page linking to the docs, latest release, and Discord.
 - `app.js`: mobile navigation, local full-text search, copy buttons, Luau highlighting, and table of contents tracking.
 - `assets/astra.svg`: gradient A logo, also used as the favicon and README mark.
 
 Content and navigation remain available without JavaScript. Search uses a generated local JSON file; it does not call an external service. Code highlighting inserts text nodes and never interprets source as HTML. No CDN or framework runtime is required.
+
+Hover, focus, dialogs, and navigation use short CSS transitions. Motion is disabled when the visitor requests reduced motion. Release links follow the repository's latest GitHub release; the ZIP must be uploaded separately when publishing a release.
 
 ## Build checks
 

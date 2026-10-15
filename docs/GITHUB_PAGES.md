@@ -32,16 +32,18 @@ Open `http://localhost:8000`. Rebuild and reload after edits. Generated files li
 
 | File | Purpose |
 | --- | --- |
-| `docs/INDEX.md` | Documentation introduction |
+| `site/landing.html` | Landing page at `index.html` |
+| `docs/INDEX.md` | Documentation introduction at `docs.html` |
 | `docs/GETTING_STARTED.md` | Build, install, and troubleshoot |
 | `docs/CUSTOMIZATION.md` | Common output settings |
 | `docs/SETUPS.md` | CLI, batch, library, and platform setups |
 | `docs/OPTIONS.md` | Every option and advanced behavior |
+| `docs/BUILDING.md` | Manual build instructions |
 | `site/styles.css` | Theme and responsive layout |
 | `site/app.js` | Local search, code copying, and mobile navigation |
 | `site/assets/astra.svg` | Gradient A logo and favicon |
 
-Every Markdown file in `docs/` is built automatically, along with the root README, `dev/README.md`, and third-party notices. Essentials and reference pages have dedicated sidebar groups; developer guides and reports remain accessible under **Developer notes**. Edit those groups in `site/build.py` when adding another primary guide. The source files remain readable on GitHub using GitHub-flavored Markdown.
+Only the six user guides listed in `PUBLIC_DOCUMENTS` in `site/build.py` are published and indexed for search. Internal developer reports, migration notes, and this publishing guide stay in the repository. The source files remain readable on GitHub using GitHub-flavored Markdown.
 
 The build checks local links and heading anchors, escapes raw HTML and code, and produces a local search index. JavaScript improves navigation; page content and links work without it.
 

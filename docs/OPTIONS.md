@@ -85,7 +85,7 @@ Upvalues use a block comment by default:
 
 `IncludeLineComments=false` suppresses the entire function line/lookup comment. `IncludeFunctionLocators=false` retains line numbers while hiding lookups. When `IncludeRequireLocators=true`, a valid ModulePath is available, and a reachable, unambiguous export is proven, that lookup takes priority. Missing game paths or disabled require locators use GC instead if `IncludeGcLocators=true`. With GC disabled, unresolved functions have only their line number. No dangling separator is emitted.
 
-A function reconstructed through a retained compiler inline guard has only `-- Uninlined by Astra` as its own metadata comment. Its line, lookup, and upvalue annotations are suppressed regardless of these presentation options. This provenance marker remains with `IncludeLineComments=false` and `IncludeUpvalueComments=false`. Ordinary functions inside that body retain their own settings. See [INLINE_RECOVERY.md](INLINE_RECOVERY.md).
+A recovered compiler-inlined function receives only `-- Uninlined by Astra` as its own metadata comment. Its line, lookup, and upvalue annotations are suppressed. Ordinary functions inside that body retain their own settings.
 
 Export analysis is skipped when its output is disabled. It never requires or executes a module. Static export paths can follow nested tables, numeric/quoted keys, directly returned functions, and recognizable constructors/metatables; conflicting writes/returns or unknown mutations prevent a claimed path.
 
@@ -93,7 +93,7 @@ GC lookups use serialized function names, never generated binding names. If both
 
 ## Live bridge configuration
 
-Start the local server, then execute the **local** `tools/Decompile.luau` (bridge v8). The optional download loader follows the Astra repository's `main` branch. Installation and requests do not print or warn. The bridge follows [Volt's WebSocket API](https://docs.voltbz.net/docs/websocket), including binary-message flags and explicit closure of discarded clients.
+Start the local server, then execute the release's included `Decompile.luau`. Installation and requests do not print or warn. Keep the bridge and executable from the same release.
 
 ```luau
 getgenv().AstraConfig = {
@@ -118,7 +118,7 @@ getgenv().AstraOptions = {
     BlankLinesBetweenGroups = 1,
     SpaceInsideTableBraces = true,
 }
--- Execute tools/Decompile.luau after setting installation options.
+-- Execute the included Decompile.luau after setting installation options.
 ```
 
 ```luau
@@ -129,11 +129,11 @@ local Generic = decompile(Camera, 60, { Naming = "Generic", UseTypeNames = false
 local Details = getgenv().AstraBridge.LastRequest
 ```
 
-Each call snapshots `getgenv().AstraOptions`, then overlays `AstraConfig.Options` and per-call options. Input tables are never mutated. Edit or replace `AstraOptions` between requests without reinstalling. A replacement `AstraConfig` supplies the next call's `Options` and `ErrorMode`; its transport settings still require reinstallation, as described below. Missing fields use the documented defaults. The table is serialized as a bounded JSON object in each ASTRA4 WebSocket message; the server never evaluates Luau configuration code. Resource limits can be reduced per request but never raised above server limits. The bridge also enforces the smaller of MaxInputBytes and its fixed 64 MiB bytecode cap. ModulePath and FilterLineField are reserved metadata; the bridge supplies their validated values. GC probing is skipped when disabled and performed lazily if a later request enables it.
+Each call snapshots `getgenv().AstraOptions`, then overlays `AstraConfig.Options` and per-call options. Input tables are never mutated. Edit or replace `AstraOptions` between requests without reinstalling. Missing fields use the documented defaults. Resource limits can be reduced per request, but cannot exceed server limits. `ModulePath` and `FilterLineField` are supplied automatically by the bridge.
 
 `Url`, `Timeout`, and `MaxPending` are captured at installation; reinstall to change connection settings. `Options` and `ErrorMode` are read from the current configuration table on each call. `MaxPending` is 1–128. A timeout stops waiting and releases the pending slot; it does not cancel C++ work already running.
 
-Module lookup metadata comes from the live instance hierarchy. The bridge uses dot access only when it resolves to the actual child, otherwise escaped `FindFirstChild` segments. It shortens three or more remaining segments to `:FindFirstChild("Name", true)` only after counting exactly one matching descendant and checking identity. Searches start within the relevant service or local player, not the whole game. Duplicate sibling names suppress require paths; duplicate descendants retain the explicit path. Nothing is required or executed during this analysis. Paths describe the hierarchy at request time.
+Module paths come from the live instance hierarchy. Unique descendants can use `FindFirstChild("Name", true)`; ambiguous names retain explicit paths or omit require locators. No module is required or executed during decompilation.
 
 The default header is exactly two comments followed by a blank line:
 
@@ -146,16 +146,16 @@ Time is measured inside the C++ decompiler from decoding through finalization, i
 
 Failures return nil by default. Inspect `AstraBridge.LastError` and `LastRequest.Succeeded/Error/ElapsedSeconds`; successful calls clear LastError and also report input/output sizes, resolved options, module-path status, GC/require counts, and line field. These fields describe the last completed call, so concurrent callers should use their own returned source. `ErrorMode="raise"` makes failures raise instead. Installation failures still return nil without replacing the original decompiler.
 
-`AstraBridge.Decompile` is a direct entry point. Reinstallation restores old hooks before installing replacements; `AstraBridge.Stop()` disconnects and restores supported cached executor references and the original global. The server processes each socket's requests in order and serves up to eight clients concurrently. A slow request on one socket can delay that socket's later requests.
+`AstraBridge.Decompile` is a direct entry point. `AstraBridge.Stop()` disconnects and restores the previous decompiler. A slow request can delay later requests on the same connection.
 
 ## CLI and batch controls
 
 `--serve --port N` starts the Windows loopback server. `--disassemble` prints decoded instructions. `--stats` adds decode/reconstruction/finalization timings, instruction/symbol counts, analysis work, and fallback count to stderr for single-file decompilation. It never changes source output.
 
 ```powershell
-./build/Release/astra.exe input.luac --casing snake --no-preserve-function-names -o output.luau
-./build/Release/astra.exe input.luac --no-gc-locators --module-path 'game.Modules.Example' --stats
-./build/Release/astra.exe --batch --jobs 4 --output-dir artifacts/output a.luac b.luac
+.\astra.exe input.luac --casing snake --no-preserve-function-names -o output.luau
+.\astra.exe input.luac --no-gc-locators --module-path 'game.Modules.Example' --stats
+.\astra.exe --batch --jobs 4 --output-dir output a.luac b.luac
 ```
 
 Batch worker count is 1 by default, 0 selects up to eight hardware threads, and explicit counts are 1–32. Results and error reporting follow input order. Invalid inputs do not prevent valid files from being written; the process exits nonzero if any fail. Filename collisions and input/output aliases are rejected before creating the output directory. Existing files require `--overwrite`. The CLI retains at most one worker-sized window of inputs/results. Batch mode cannot combine with server mode, disassembly, `--stats`, or `-o`.

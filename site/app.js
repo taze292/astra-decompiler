@@ -5,21 +5,26 @@ document.documentElement.classList.add("js-enabled");
 
 const Menu = document.querySelector(".mobile-toggle");
 const Sidebar = document.querySelector(".sidebar");
-Menu.hidden = false;
-Menu.addEventListener("click", () => {
-    const IsOpen = Sidebar.classList.toggle("is-open");
-    Menu.setAttribute("aria-expanded", String(IsOpen));
-    Menu.textContent = IsOpen ? "Close" : "Menu";
-});
+if (Menu && Sidebar) {
+    Menu.hidden = false;
+    Menu.addEventListener("click", () => {
+        const IsOpen = Sidebar.classList.toggle("is-open");
+        Menu.setAttribute("aria-expanded", String(IsOpen));
+        Menu.textContent = IsOpen ? "Close" : "Menu";
+    });
+}
 
 for (const Block of document.querySelectorAll(".code-block")) {
     const Button = Block.querySelector(".copy-code");
     const Code = Block.querySelector("code");
+    const Label = Button.getAttribute("aria-label");
+    let FeedbackTimer;
     Button.hidden = false;
     Button.addEventListener("click", async () => {
         try {
             await navigator.clipboard.writeText(Code.textContent);
             Button.textContent = "Copied";
+            Button.setAttribute("aria-label", "Code copied");
         } catch {
             const Range = document.createRange();
             Range.selectNodeContents(Code);
@@ -27,8 +32,13 @@ for (const Block of document.querySelectorAll(".code-block")) {
             Selection.removeAllRanges();
             Selection.addRange(Range);
             Button.textContent = "Selected";
+            Button.setAttribute("aria-label", "Code selected. Press Ctrl+C or Command+C to copy");
         }
-        window.setTimeout(() => { Button.textContent = "Copy"; }, 1600);
+        window.clearTimeout(FeedbackTimer);
+        FeedbackTimer = window.setTimeout(() => {
+            Button.textContent = "Copy";
+            Button.setAttribute("aria-label", Label);
+        }, 1600);
     });
 
     // Tokenize only the displayed text; never interpret source as HTML.
@@ -106,7 +116,7 @@ async function OpenSearch() {
     ShowResults();
 }
 
-if (typeof Search.showModal === "function") {
+if (Search && typeof Search.showModal === "function") {
     Trigger.hidden = false;
     Trigger.addEventListener("click", OpenSearch);
     document.querySelector(".close-search").addEventListener("click", () => Search.close());

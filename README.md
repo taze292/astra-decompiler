@@ -2,26 +2,22 @@
 
 # Astra
 
-**[Documentation](https://taze292.github.io/astra-decompiler/)** · [Getting started](docs/GETTING_STARTED.md) · [Customization](docs/CUSTOMIZATION.md) · [Options reference](docs/OPTIONS.md)
+**[Download](https://github.com/taze292/astra-decompiler/releases/latest)** · [Documentation](https://taze292.github.io/astra-decompiler/docs.html) · [Join Discord](https://discord.gg/FjUbXtdCzU)
 
 A fast C++20 decompiler for Luau bytecode. Use Astra through a local Roblox bridge, the command line, or a C++ library. Output supports inferred names, native captures, method syntax, compact arrays, and configurable comments and spacing.
 
 ## Set up
 
-Install CMake and a C++20 toolchain. On Windows, use Visual Studio 2022 with C++ tools, the Windows SDK, and ClangCL. Put the [official Luau source](https://github.com/luau-lang/luau) in `luau/`, then build:
-
-```powershell
-./build.ps1 -Test
-./build/Release/astra.exe --serve
-```
-
-Execute [tools/Decompile.luau](tools/Decompile.luau) in your executor, then call:
+1. Download the **Windows x64 ZIP** from the [latest release](https://github.com/taze292/astra-decompiler/releases/latest) and extract it.
+2. Run `Start-Decompiler.cmd` and leave the server open.
+3. Execute the included `Decompile.luau` in your Roblox executor.
+4. Call `decompile`:
 
 ```luau
 local Source = decompile(SomeScript)
 ```
 
-The bridge needs `getscriptbytecode` and `WebSocket.connect` or `websocket.connect`. It follows [Volt's WebSocket API](https://docs.voltbz.net/docs/websocket) and runs silently. The local server must stay open. See [setup and troubleshooting](docs/GETTING_STARTED.md) for details.
+No build tools are needed. Your executor needs `getscriptbytecode` and `WebSocket.connect` or `websocket.connect`. See [installation and troubleshooting](docs/GETTING_STARTED.md), or [build from source](docs/BUILDING.md).
 
 ## Customize
 
@@ -50,14 +46,12 @@ Omitted fields use Astra's internal defaults. Per-call settings override the glo
 ## Other setups
 
 ```powershell
-./build/Release/astra.exe input.luac -o output.luau
-./build/Release/astra.exe --batch --jobs 4 --output-dir output a.luac b.luac
+.\astra.exe input.luac -o output.luau
+.\astra.exe --batch --jobs 4 --output-dir output a.luac b.luac
 ```
 
 Input is raw, decompressed serialized Luau bytecode. Original comments, formatting, and stripped names cannot be recovered exactly. See [CLI, batch, and C++ setups](docs/SETUPS.md), the [complete options reference](docs/OPTIONS.md), and [compatibility notes](docs/SETUPS.md#compatibility).
 
 ## Contribute
 
-Run `./build.ps1 -Test` before submitting changes. The [developer guide](dev/README.md) explains the organized source tree and test tools. See the [architecture](docs/ARCHITECTURE.md), [Astra 0.5 control-flow validation](docs/OBFUSCATED_CONTROL_FLOW.md), and [third-party notices](THIRD_PARTY_NOTICES.md).
-
-Documentation uses Markdown, a small static generator, and GitHub Pages. No npm packages or separate Pages branch are needed. [Preview or publish the docs →](docs/GITHUB_PAGES.md)
+See [build from source](docs/BUILDING.md) and the [developer guide](dev/README.md). Run `./build.ps1 -Test` before submitting changes. [Third-party notices](THIRD_PARTY_NOTICES.md) cover Luau.
