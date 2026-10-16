@@ -30,7 +30,7 @@ The script connects before installing `getgenv().decompile`. It does not print o
 local Source = decompile(SomeScript)
 ```
 
-The target must be a script Instance with accessible bytecode, including a ModuleScript, LocalScript, or client-run Script. Decompiling a module does not require or execute it.
+The target can be a script Instance with accessible bytecode, including a ModuleScript, LocalScript, or client-run Script, or a raw bytecode string such as `getscriptbytecode(SomeScript)`. Decompiling a module does not require or execute it. Volt's native `DecompilerOptions` values are accepted; supported settings are translated and unsupported settings are listed in `AstraBridge.LastRequest.IgnoredNativeOptions`.
 
 ## Change the output
 
@@ -72,7 +72,7 @@ local Source = decompile(SomeScript, 60, {
 
 Timeout stops waiting; it does not cancel work already running on the server. [Processing limits](OPTIONS.md#shared-options) can be reduced per request.
 
-**Connection settings changed:** reinstall the bridge after editing `AstraConfig.Url`, `Timeout`, or `MaxPending`. Output options can change without reinstallation.
+**Connection settings changed:** reinstall the bridge after editing connection, queue, concurrency, transport, or cache settings in `AstraConfig`. Output options can change without reinstallation. See the [configuration reference](OPTIONS.md#live-bridge-configuration).
 
 **Restore the previous decompiler:** call `getgenv().AstraBridge.Stop()`.
 

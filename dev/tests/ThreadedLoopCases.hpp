@@ -329,5 +329,43 @@ inline std::vector<ThreadedLoopFixture> ThreadedLoopCases()
                                       (NormalWrite == 2 ? "_early_break" : ""),
                                   Builder.getBytecode(), Match && NormalWrite != 2 ? "1:false;" : "1:true;"});
             }
+    for (bool Early : {false, true})
+    {
+        // A repeat header writes the same register as the exhaustion default.
+        // Hoisting that default would retain 7 instead of 9 on normal exit.
+        Luau::BytecodeBuilder Builder;
+        auto Main = Builder.beginFunction(0);
+        auto One = Builder.addConstantNumber(1);
+        auto Nine = Builder.addConstantNumber(9);
+        Builder.emitAD(LOP_LOADN, 0, 0);
+        Builder.emitABC(LOP_LOADB, 1, Early ? 1 : 0, 0);
+        Builder.emitAD(LOP_LOADN, 3, 3);
+        auto Header = Builder.emitLabel();
+        Builder.emitAD(LOP_LOADN, 2, 7);
+        Builder.emitABC(LOP_ADDK, 0, 0, std::uint8_t(One));
+        auto Choice = Builder.emitLabel();
+        Builder.emitAD(LOP_JUMPIFNOT, 1, 0);
+        auto EarlyExit = Builder.emitLabel();
+        Builder.emitAD(LOP_JUMP, 0, 0);
+        auto Check = Builder.emitLabel();
+        Builder.emitAD(LOP_JUMPIFLT, 0, 0);
+        Builder.emitAux(3);
+        Builder.emitAD(LOP_LOADN, 2, 9);
+        auto Join = Builder.emitLabel();
+        Builder.emitAD(LOP_JUMPXEQKN, 2, 0);
+        Builder.emitAux(unsigned(Nine) | (1u << 31));
+        Builder.emitABC(LOP_ADDK, 2, 2, std::uint8_t(One));
+        auto Done = Builder.emitLabel();
+        Builder.emitABC(LOP_RETURN, 2, 2, 0);
+        Patch(Builder, Choice, Check);
+        Patch(Builder, EarlyExit, Join);
+        Patch(Builder, Check, Header);
+        Patch(Builder, Join, Done);
+        Builder.endFunction(4, 0);
+        Builder.setMainFunction(Main);
+        Builder.finalize();
+        Result.push_back({std::string("bytecode_threaded_natural_header_default_") + (Early ? "early" : "normal"),
+                          Builder.getBytecode(), Early ? "3:1:7;" : "3:2:10;"});
+    }
     return Result;
 }

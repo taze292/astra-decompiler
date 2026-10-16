@@ -15,6 +15,10 @@ Environment.AstraConfig = Environment.AstraConfig or {
     Url = "ws://127.0.0.1:8877/decompile",
     Timeout = 30,
     MaxPending = 32,
+    MaxQueued = 16384, -- Calls waiting for an active request slot; 0 rejects overflow.
+    Concurrency = 8, -- Workers used by AstraBridge.DecompileMany/PrepareSave.
+    BinaryTransport = true, -- ASTRA5 avoids Lua hex encoding and halves the payload.
+    CacheBytes = 32 * 1024 * 1024, -- Bounded successful-source cache; 0 disables it.
     ErrorMode = "silent", -- "silent" returns nil; "raise" raises LastError.
 }
 
@@ -73,6 +77,10 @@ end
 local Url = Config.Url or "ws://127.0.0.1:8877/decompile"
 local DefaultTimeout = Config.Timeout or 30
 local MaxPending = Config.MaxPending or 32
+local MaxQueued = if Config.MaxQueued == nil then 16384 else Config.MaxQueued
+local Concurrency = Config.Concurrency or math.min(8, if type(MaxPending) == "number" then MaxPending else 8)
+local CacheLimit = if Config.CacheBytes == nil then 32 * 1024 * 1024 else Config.CacheBytes
+local BinaryTransport = Config.BinaryTransport ~= false
 local BridgeByteLimit = 64 * 1024 * 1024
 
 if type(Url) ~= "string" or not Url:match("^wss?://") then
@@ -80,6 +88,14 @@ if type(Url) ~= "string" or not Url:match("^wss?://") then
 end
 
 if type(MaxPending) ~= "number" or MaxPending % 1 ~= 0 or MaxPending < 1 or MaxPending > 128 then
+    return nil
+end
+
+if type(Concurrency) ~= "number" or Concurrency % 1 ~= 0 or Concurrency < 1 or Concurrency > MaxPending
+    or type(MaxQueued) ~= "number" or MaxQueued ~= MaxQueued or MaxQueued % 1 ~= 0 or MaxQueued < 0 or MaxQueued > 65536
+    or (Config.BinaryTransport ~= nil and type(Config.BinaryTransport) ~= "boolean")
+    or type(CacheLimit) ~= "number" or CacheLimit ~= CacheLimit or CacheLimit % 1 ~= 0
+    or CacheLimit < 0 or CacheLimit > 256 * 1024 * 1024 then
     return nil
 end
 
@@ -97,13 +113,15 @@ local IsPreviousBridge = type(Previous) == "table" and Previous.Marker == "Astra
 local Original = if IsPreviousBridge then Previous.Original else PreviousDecompile
 local Bridge = {
     Marker = "AstraBridge1",
-    Version = 8,
+    Version = 9,
     Original = Original,
     Url = Url,
     Connected = false,
     HookTargets = {},
     FilterLineField = "Line",
     LineProbe = "disabled",
+    Protocol = if BinaryTransport then "ASTRA5" else "ASTRA4",
+    Stats = { Requests = 0, Succeeded = 0, Failed = 0, CacheHits = 0, InputBytes = 0, OutputBytes = 0 },
 }
 
 local HookTargets = { Original, PreviousDecompile }
@@ -151,6 +169,69 @@ local ActiveRequests = 0
 local Connecting = false
 local Stopped = false
 local Installed
+local SlotWaiters = {}
+local FirstSlot = 1
+local LastSlot = 0
+local QueuedRequests = 0
+local Cache = {}
+local CacheSize = 0
+local CacheEntries = 0
+local CacheClock = 0
+
+local function NativeOptions(Value)
+    -- Volt passes DecompilerOptions userdata to its cached decompile function.
+    -- Read only documented properties and map the compatible formatting knobs.
+    local Mapped = {}
+    local Ignored = {}
+    local Found = false
+    local function Read(Object, Key)
+        local Ok, Result = pcall(function() return Object[Key] end)
+        return if Ok then Result else nil
+    end
+    local Rename = Read(Value, "SmartVariableRenamer")
+    if type(Rename) == "boolean" then
+        Mapped.Naming = if Rename then "inferred" else "generic"
+        Found = true
+    end
+    for _, Key in { "FunctionDeclarations", "GuardClauses", "ConstantFolding", "ConditionalStructurer", "DoBlockInsertionThreshold" } do
+        if Read(Value, Key) ~= nil then
+            Found = true
+            table.insert(Ignored, Key)
+        end
+    end
+    local Formatter = Read(Value, "Formatter")
+    if Formatter ~= nil then
+        Found = true
+        for Native, Astra in {
+            IndentWidth = "IndentWidth",
+            FunctionMetadataEnabled = "IncludeLineComments",
+            FunctionMetadataIncludeUpvalues = "IncludeUpvalueComments",
+        } do
+            local Field = Read(Formatter, Native)
+            if type(Field) == type(DefaultOptions[Astra]) then
+                Mapped[Astra] = Field
+            end
+        end
+        for _, Key in { "ColumnLimit", "ParenthesizeConditions", "AppendSemicolons", "FunctionMetadataLayout",
+            "FunctionMetadataIncludeName", "FunctionMetadataIncludeLine", "FunctionMetadataUpvalueFormat" } do
+            if Read(Formatter, Key) ~= nil then table.insert(Ignored, "Formatter." .. Key) end
+        end
+        if Read(Formatter, "FunctionMetadataEnabled") == false then
+            Mapped.IncludeUpvalueComments = false
+        end
+    end
+    return if Found then Mapped else nil, Ignored
+end
+
+local function NormalizeOverrides(Value)
+    if type(Value) == "userdata" or (type(Value) == "table" and
+        (Value.SmartVariableRenamer ~= nil or Value.Formatter ~= nil or Value.ConditionalStructurer ~= nil
+            or Value.GuardClauses ~= nil or Value.FunctionDeclarations ~= nil or Value.ConstantFolding ~= nil
+            or Value.DoBlockInsertionThreshold ~= nil)) then
+        return NativeOptions(Value)
+    end
+    return Value
+end
 
 -- Functions
 local function SameInstance(Left, Right)
@@ -366,21 +447,33 @@ local function ModulePath(Target)
         Current = Parent
     end
 
+    -- A full game scan per module makes saves quadratic in the size of the
+    -- hierarchy. Shortening is optional; spend a bounded amount of work and
+    -- retain the validated explicit path when uniqueness cannot be proved.
+    local SearchBudget = 512
+    local function UniqueDescendant(Ancestor)
+        local Stack = { Ancestor }
+        local Matches = 0
+        while #Stack > 0 do
+            local Parent = table.remove(Stack)
+            for _, Child in Parent:GetChildren() do
+                if SearchBudget == 0 then return false end
+                SearchBudget -= 1
+                if Child.Name == Target.Name then
+                    Matches += 1
+                    if Matches > 1 then return false end
+                end
+                table.insert(Stack, Child)
+            end
+        end
+        return Matches == 1
+    end
+
     for Index = #Parts, 1, -1 do
         -- Recursive lookup is worthwhile only when it saves two or more segments.
-        if Index > 2 and (Index < #Parts or Base ~= "game") then
+        if SearchBudget > 0 and Index > 2 and (Index < #Parts or Base ~= "game") then
             local Ancestor = Ancestors[Index]
-            local Matches = 0
-            for _, Descendant in Ancestor:GetDescendants() do
-                if Descendant.Name == Target.Name then
-                    Matches += 1
-                    if Matches > 1 then
-                        break
-                    end
-                end
-            end
-
-            if Matches == 1 and SameInstance(Ancestor:FindFirstChild(Target.Name, true), Target) then
+            if UniqueDescendant(Ancestor) and SameInstance(Ancestor:FindFirstChild(Target.Name, true), Target) then
                 Base ..= ':FindFirstChild(' .. QuoteName(Target.Name) .. ', true)'
                 break
             end
@@ -404,6 +497,76 @@ local function IsClosed(Current)
     return Ok and Closed == true
 end
 
+local function Unqueue(Request)
+    local Index = Request.SlotIndex
+    if Index and SlotWaiters[Index] == Request then
+        SlotWaiters[Index] = nil
+        QueuedRequests -= 1
+        Request.SlotIndex = nil
+    end
+    while FirstSlot <= LastSlot and SlotWaiters[FirstSlot] == nil do FirstSlot += 1 end
+    if FirstSlot > LastSlot then FirstSlot, LastSlot = 1, 0 end
+end
+
+local function Finish(Request, Failure)
+    if Request.Done then
+        return
+    end
+    Request.Error = Failure
+    Request.Done = true
+    if Request.SlotIndex then Unqueue(Request) end
+    if Request.Waiter then
+        if type(task.defer) == "function" then task.defer(Request.Waiter) else task.spawn(Request.Waiter) end
+    end
+end
+
+local function AcquireSlot(Deadline)
+    if Stopped then return nil, "Astra bridge stopped" end
+    if ActiveRequests < MaxPending then
+        ActiveRequests += 1
+        return true
+    end
+    if QueuedRequests >= MaxQueued then return nil, "Astra queued request limit reached" end
+    local Waiting = { Deadline = Deadline }
+    LastSlot += 1
+    Waiting.SlotIndex = LastSlot
+    SlotWaiters[LastSlot] = Waiting
+    QueuedRequests += 1
+    if type(task.delay) == "function" then
+        Waiting.Waiter = coroutine.running()
+        Waiting.Timer = task.delay(math.max(0, Deadline - os.clock()), function()
+            Finish(Waiting, "Astra pending request queue timed out")
+        end)
+        coroutine.yield()
+        Waiting.Waiter = nil
+        if type(task.cancel) == "function" then pcall(task.cancel, Waiting.Timer) end
+    else
+        while not Waiting.Done and os.clock() < Deadline and not Stopped do task.wait() end
+        if not Waiting.Done then Finish(Waiting, if Stopped then "Astra bridge stopped" else "Astra pending request queue timed out") end
+    end
+    return Waiting.Granted, Waiting.Error
+end
+
+local function ReleaseSlot()
+    ActiveRequests -= 1
+    while FirstSlot <= LastSlot and ActiveRequests < MaxPending do
+        local Waiting = SlotWaiters[FirstSlot]
+        if Waiting then Unqueue(Waiting) else FirstSlot += 1 end
+        if Waiting and not Waiting.Done then
+            if Stopped then
+                Finish(Waiting, "Astra bridge stopped")
+            elseif os.clock() >= Waiting.Deadline then
+                Finish(Waiting, "Astra pending request queue timed out")
+            else
+                Waiting.Granted = true
+                ActiveRequests += 1
+                Finish(Waiting)
+            end
+        end
+    end
+    if FirstSlot > LastSlot then FirstSlot, LastSlot = 1, 0 end
+end
+
 local function Disconnect(Reason)
     Bridge.Connected = false
     local OldSocket = Socket
@@ -417,8 +580,7 @@ local function Disconnect(Reason)
     table.clear(Connections)
 
     for _, Request in Pending do
-        Request.Error = Reason or "Astra WebSocket disconnected"
-        Request.Done = true
+        Finish(Request, Reason or "Astra WebSocket disconnected")
     end
 
     if OldSocket then
@@ -495,14 +657,15 @@ local function EnsureConnected(Deadline)
                 return
             end
 
+            local Failure
             if #Body > Request.MaxOutputBytes then
-                Request.Error = "Astra response exceeded the output byte limit"
+                Failure = "Astra response exceeded the output byte limit"
             elseif Status == "ok" then
                 Request.Source = Body
             else
-                Request.Error = Body or "Invalid Astra response"
+                Failure = if Status == "error" then Body else "Invalid Astra response status: " .. Status
             end
-            Request.Done = true
+            Finish(Request, Failure)
         end)
 
         Connections[2] = Current.OnClose:Connect(function()
@@ -521,17 +684,30 @@ local function EnsureConnected(Deadline)
     return Current
 end
 
-local function Decompile(Target, Timeout, Overrides)
-    if typeof(Target) ~= "Instance"
-        or not (Target:IsA("LocalScript") or Target:IsA("ModuleScript") or Target:IsA("Script") or Target:IsA("CoreScript")) then
-        return nil, "Expected a script Instance"
+local function Decompile(Target, Timeout, Overrides, Deadline)
+    local IgnoredNativeOptions
+    local RawBytecode = type(Target) == "string"
+    if not RawBytecode and (typeof(Target) ~= "Instance"
+        or not (Target:IsA("LocalScript") or Target:IsA("ModuleScript") or Target:IsA("Script") or Target:IsA("CoreScript"))) then
+        return nil, "Expected a script Instance or raw bytecode string"
     end
 
-    if type(Timeout) == "table" then
+    if type(Timeout) == "table" or type(Timeout) == "userdata" then
         if Overrides ~= nil then
             return nil, "Options were supplied twice"
         end
-        Overrides, Timeout = Timeout, nil
+        Overrides, IgnoredNativeOptions = NormalizeOverrides(Timeout)
+        Timeout = nil
+        if Overrides == nil then
+            return nil, "Unsupported native decompiler options"
+        end
+    end
+
+    if Overrides ~= nil then
+        local Normalized, Ignored = NormalizeOverrides(Overrides)
+        if Normalized == nil then return nil, "Unsupported native decompiler options" end
+        Overrides = Normalized
+        IgnoredNativeOptions = Ignored or IgnoredNativeOptions
     end
 
     Timeout = Timeout or DefaultTimeout
@@ -544,22 +720,25 @@ local function Decompile(Target, Timeout, Overrides)
         Bridge.FilterLineField, Bridge.LineProbe = DetectLineField()
     end
 
-    local Deadline = os.clock() + Timeout
+    Deadline = Deadline or os.clock() + Timeout
+    if os.clock() >= Deadline then return nil, "Astra pending request queue timed out" end
     local Current = EnsureConnected(Deadline)
     if not Current then
         return nil, if Stopped then "Astra bridge stopped" else "Astra connection failed or timed out"
     end
 
-    local Ok, Bytecode = pcall(GetBytecode, Target)
+    local Ok, Bytecode = true, Target
+    if not RawBytecode then
+        Ok, Bytecode = pcall(GetBytecode, Target)
+    end
     local InputLimit = math.min(Options.MaxInputBytes, BridgeByteLimit)
     if not Ok or type(Bytecode) ~= "string" or #Bytecode == 0 or #Bytecode > InputLimit then
         return nil, "Could not obtain nonempty bytecode within the input byte limit"
     end
 
-    local Encoded = Bytecode:gsub(".", Hex)
     local Expression = ""
-    local PathStatus = "require lookups disabled"
-    if Options.IncludeLineComments and Options.IncludeFunctionLocators and Options.IncludeRequireLocators then
+    local PathStatus = if RawBytecode then "raw bytecode has no module path" else "require lookups disabled"
+    if not RawBytecode and Options.IncludeLineComments and Options.IncludeFunctionLocators and Options.IncludeRequireLocators then
         -- A restricted or changing hierarchy must not prevent bytecode recovery.
         local PathOk, RecoveredPath, Status = pcall(ModulePath, Target)
         if PathOk then
@@ -569,6 +748,24 @@ local function Decompile(Target, Timeout, Overrides)
         end
     end
     local Path = Expression:gsub(".", Hex)
+
+    if os.clock() >= Deadline then
+        return nil, "Timed out while preparing bytecode"
+    end
+
+    local Cached = Cache[Target]
+    if Cached and Cached.Bytecode == Bytecode and Cached.EncodedOptions == EncodedOptions
+        and Cached.ModulePath == Expression and Cached.FilterLineField == Bridge.FilterLineField then
+        CacheClock += 1
+        Cached.Access = CacheClock
+        Bridge.Stats.CacheHits += 1
+        Bridge.LastRequest = table.clone(Cached.Details)
+        Bridge.LastRequest.Options = table.clone(Cached.Details.Options)
+        Bridge.LastRequest.CacheHit = true
+        Bridge.LastRequest.IgnoredNativeOptions = IgnoredNativeOptions
+        return Cached.Source
+    end
+    local Encoded = if BinaryTransport then Bytecode else Bytecode:gsub(".", Hex)
 
     if os.clock() >= Deadline then
         return nil, "Timed out while preparing bytecode"
@@ -589,7 +786,7 @@ local function Decompile(Target, Timeout, Overrides)
     Pending[Id] = Request
 
     local Sent, SendError = pcall(function()
-        Current:Send(Id .. "\nASTRA4\n" .. Bridge.FilterLineField .. "\n" .. Path .. "\n" .. EncodedOptions .. "\n" .. Encoded)
+        Current:Send(Id .. "\n" .. Bridge.Protocol .. "\n" .. Bridge.FilterLineField .. "\n" .. Path .. "\n" .. EncodedOptions .. "\n" .. Encoded, BinaryTransport)
     end)
 
     if not Sent then
@@ -598,14 +795,32 @@ local function Decompile(Target, Timeout, Overrides)
         return nil, "Astra send failed: " .. tostring(SendError)
     end
 
-    while not Request.Done and os.clock() < Deadline and not Stopped do
+    if not Request.Done and type(task.delay) == "function" then
         if Socket ~= Current or IsClosed(Current) then
-            if Socket == Current then
-                Disconnect("Astra WebSocket was closed while awaiting a response")
+            Disconnect("Astra WebSocket was closed while awaiting a response")
+        else
+            -- Resume directly on completion instead of charging every script a
+            -- frame of polling latency. The timer also bounds lost responses.
+            Request.Waiter = coroutine.running()
+            Request.Timer = task.delay(math.max(0, Deadline - os.clock()), function()
+                Finish(Request, "Astra request timed out")
+            end)
+            coroutine.yield()
+            Request.Waiter = nil
+            if type(task.cancel) == "function" then
+                pcall(task.cancel, Request.Timer)
             end
-            break
         end
-        task.wait()
+    else
+        while not Request.Done and os.clock() < Deadline and not Stopped do
+            if Socket ~= Current or IsClosed(Current) then
+                if Socket == Current then
+                    Disconnect("Astra WebSocket was closed while awaiting a response")
+                end
+                break
+            end
+            task.wait()
+        end
     end
     Pending[Id] = nil
 
@@ -624,31 +839,70 @@ local function Decompile(Target, Timeout, Overrides)
         Options = Options,
         InputBytes = #Bytecode,
         OutputBytes = #Request.Source,
+        CacheHit = false,
+        Protocol = Bridge.Protocol,
+        IgnoredNativeOptions = IgnoredNativeOptions,
     }
+    Bridge.Stats.InputBytes += #Bytecode
+    Bridge.Stats.OutputBytes += #Request.Source
+    local Size = #Bytecode + #Request.Source
+    if CacheLimit > 0 and Size <= CacheLimit then
+        -- Other calls may have filled this slot while this request yielded.
+        local Replaced = Cache[Target]
+        if Replaced then
+            CacheSize -= Replaced.Size
+            CacheEntries -= 1
+            Cache[Target] = nil
+        end
+        while CacheSize + Size > CacheLimit or CacheEntries >= 8192 do
+            local OldestKey, Oldest
+            for Key, Entry in Cache do
+                if not Oldest or Entry.Access < Oldest.Access then
+                    OldestKey, Oldest = Key, Entry
+                end
+            end
+            Cache[OldestKey] = nil
+            CacheSize -= Oldest.Size
+            CacheEntries -= 1
+        end
+        CacheClock += 1
+        Cache[Target] = {
+            Bytecode = Bytecode, Source = Request.Source, EncodedOptions = EncodedOptions,
+            ModulePath = Expression, FilterLineField = Bridge.FilterLineField,
+            Details = table.clone(Bridge.LastRequest), Size = Size, Access = CacheClock,
+        }
+        CacheSize += Size
+        CacheEntries += 1
+    end
     return Request.Source
 end
 
-Installed = function(...)
+Installed = function(Target, Timeout, Overrides)
     local Started = os.clock()
+    Bridge.Stats.Requests += 1
     local CurrentConfig = Environment.AstraConfig
     local Ok, Result, Failure
 
-    if ActiveRequests >= MaxPending then
-        Ok, Failure = true, "Astra pending request limit reached"
+    local Budget = if type(Timeout) == "number" and Timeout > 0 and Timeout < math.huge then Timeout else DefaultTimeout
+    local Deadline = Started + Budget
+    local Admitted, AdmissionError = AcquireSlot(Deadline)
+    if not Admitted then
+        Ok, Failure = true, AdmissionError
     else
-        ActiveRequests += 1
-        Ok, Result, Failure = pcall(Decompile, ...)
-        ActiveRequests -= 1
+        Ok, Result, Failure = pcall(Decompile, Target, Timeout, Overrides, Deadline)
+        ReleaseSlot()
     end
 
     if Ok and Result ~= nil then
         Bridge.LastError = nil
         Bridge.LastRequest.Succeeded = true
         Bridge.LastRequest.ElapsedSeconds = os.clock() - Started
+        Bridge.Stats.Succeeded += 1
         return Result
     end
 
     Bridge.LastError = tostring(if Ok then Failure or "Astra decompilation failed" else Result)
+    Bridge.Stats.Failed += 1
     Bridge.LastRequest = {
         Succeeded = false,
         Error = Bridge.LastError,
@@ -658,7 +912,61 @@ Installed = function(...)
     if type(CurrentConfig) == "table" and CurrentConfig.ErrorMode == "raise" then
         error(Bridge.LastError, 2)
     end
-    return nil
+    return nil, Bridge.LastError
+end
+
+function Bridge.ClearCache()
+    table.clear(Cache)
+    CacheSize = 0
+    CacheEntries = 0
+end
+
+function Bridge.DecompileMany(Targets, Timeout, Overrides)
+    if type(Targets) ~= "table" then
+        error("DecompileMany expects an array of scripts or bytecode strings", 2)
+    end
+    local Results = table.create(#Targets)
+    local Next = 0
+    local Remaining = math.min(Concurrency, #Targets)
+    for _ = 1, Remaining do
+        task.spawn(function()
+            while not Stopped do
+                Next += 1
+                local Index = Next
+                if Index > #Targets then break end
+                local Ok, Source, Failure = pcall(Installed, Targets[Index], Timeout, Overrides)
+                Results[Index] = { Source = if Ok then Source else nil, Error = if Ok then Failure else tostring(Source) }
+            end
+            Remaining -= 1
+        end)
+    end
+    while Remaining > 0 do task.wait() end
+    for Index = 1, #Targets do
+        if Results[Index] == nil then Results[Index] = { Error = "Astra bridge stopped" } end
+    end
+    return Results
+end
+
+function Bridge.PrepareSave(Roots, Timeout, Overrides)
+    if typeof(Roots) == "Instance" then Roots = { Roots } end
+    if type(Roots) ~= "table" then error("PrepareSave expects an Instance or array of Instances", 2) end
+    local Targets, Seen = {}, {}
+    local function Add(Target)
+        if Target:IsA("Script") then
+            local Ok, RunContext = pcall(function() return tostring(Target.RunContext) end)
+            if not Ok or (RunContext ~= "Client" and RunContext ~= "Enum.RunContext.Client") then return end
+        end
+        if not Seen[Target] and (Target:IsA("LocalScript") or Target:IsA("ModuleScript") or Target:IsA("CoreScript")
+            or Target:IsA("Script")) then
+            Seen[Target] = true
+            table.insert(Targets, Target)
+        end
+    end
+    for _, Root in Roots do
+        Add(Root)
+        for _, Target in Root:GetDescendants() do Add(Target) end
+    end
+    return Bridge.DecompileMany(Targets, Timeout, Overrides), Targets
 end
 
 function Bridge.Stop()
@@ -667,6 +975,11 @@ function Bridge.Stop()
     end
 
     Stopped = true
+    Bridge.ClearCache()
+    while FirstSlot <= LastSlot do
+        local Waiting = SlotWaiters[FirstSlot]
+        if Waiting then Finish(Waiting, "Astra bridge stopped") else FirstSlot += 1 end
+    end
     Disconnect("Astra bridge stopped")
     for Index = #Hooks, 1, -1 do
         local Entry = Hooks[Index]

@@ -116,9 +116,14 @@ unsigned Function::LoopContinuation(unsigned Head, unsigned Tail, unsigned Limit
 {
     GuardDefault = false;
     const unsigned Finish = Tail + 1;
+    const auto &Prep = P.Instructions[Head];
+    const bool Native = Prep.Op == LOP_FORNPREP || Prep.Op == LOP_FORGPREP || Prep.Op == LOP_FORGPREP_NEXT ||
+                        Prep.Op == LOP_FORGPREP_INEXT;
+    const unsigned HiddenEnd = Native ? Prep.A + 3 + (Prep.Op == LOP_FORNPREP ? 0 : (P.Instructions[Tail].Aux & 255)) : 0;
     unsigned Join = Finish;
-    for (unsigned K = Head + 1; K < Tail; ++K)
+    for (unsigned K = Native ? Head + 1 : Head; K < Tail; ++K)
     {
+        E.Analysis.Spend();
         const auto &Edge = P.Instructions[K];
         if (!Jump(Edge.Op) && !Conditional(Edge.Op))
             continue;
@@ -167,8 +172,6 @@ unsigned Function::LoopContinuation(unsigned Head, unsigned Tail, unsigned Limit
             auto Tag = P.Constants[I.Op == LOP_LOADK ? unsigned(I.D) : I.Aux].Tag;
             Literal = Tag == LBC_CONSTANT_NIL || Tag == LBC_CONSTANT_BOOLEAN || Tag == LBC_CONSTANT_NUMBER || Tag == LBC_CONSTANT_STRING;
         }
-        const auto &Prep = P.Instructions[Head];
-        unsigned HiddenEnd = Prep.A + 3 + (Prep.Op == LOP_FORNPREP ? 0 : (P.Instructions[Tail].Aux & 255));
         if (I.Op == LOP_MOVE)
         {
             unsigned Source = SymbolAt(I.B, I.Pc);
@@ -181,7 +184,7 @@ unsigned Function::LoopContinuation(unsigned Head, unsigned Tail, unsigned Limit
             Sources.insert(Source);
             Literal = true;
         }
-        if (!Literal || Cells.count(I.A) || ScalarReferences.count(I.A) || Flow.LiveIn[Head + 1].test(I.A) ||
+        if (!Literal || Cells.count(I.A) || ScalarReferences.count(I.A) || Flow.LiveIn[Native ? Head + 1 : Head].test(I.A) ||
             (I.A >= Prep.A && I.A < HiddenEnd))
             return Guard();
         Defaults.set(I.A);
@@ -191,23 +194,30 @@ unsigned Function::LoopContinuation(unsigned Head, unsigned Tail, unsigned Limit
     // A default may move before the loop only when normal exhaustion cannot
     // retain a body write to it. Early-return writes must leave through Join.
     std::vector<bool> ReachesTail(Tail - Head + 1);
-    std::vector<unsigned> Pending{Tail};
+    std::vector<unsigned> Pending;
+    if (Native)
+        Pending.push_back(Tail);
+    else
+        for (unsigned Before : Flow.Predecessors[Head])
+            if (Before >= Head && Before <= Tail)
+                Pending.push_back(Before);
     while (!Pending.empty())
     {
         unsigned K = Pending.back();
         Pending.pop_back();
-        if (K <= Head || K > Tail || ReachesTail[K - Head])
+        if (K < Head || (Native && K == Head) || K > Tail || ReachesTail[K - Head])
             continue;
         ReachesTail[K - Head] = true;
         E.Analysis.Spend(1 + Flow.Predecessors[K].size());
         for (unsigned R : Writes(P.Instructions[K], P))
         {
-            if (K != Tail && Defaults.test(R))
+            if ((!Native || K != Tail) && Defaults.test(R))
                 return Guard();
             if (Sources.count(WriteSymbols[K][R]))
                 return Guard();
         }
-        Pending.insert(Pending.end(), Flow.Predecessors[K].begin(), Flow.Predecessors[K].end());
+        if (K != Head)
+            Pending.insert(Pending.end(), Flow.Predecessors[K].begin(), Flow.Predecessors[K].end());
     }
     for (unsigned K : DefaultPath)
         Simple(P.Instructions[K], Before);
@@ -289,6 +299,13 @@ std::vector<Statement> Function::Region(unsigned Start, unsigned End, int BreakT
     const int BreakDestination = BreakTarget < 0 ? -1 : int(JumpDestination(unsigned(BreakTarget)));
     const int ContinueDestination = ContinueTarget < 0 ? -1 : int(JumpDestination(unsigned(ContinueTarget)));
     const int NormalBreakDestination = NormalBreakTarget < 0 ? -1 : int(JumpDestination(unsigned(NormalBreakTarget)));
+    auto LoopExit = [&](int Target)
+    {
+        if (Target < 0)
+            return false;
+        int Destination = int(JumpDestination(unsigned(Target)));
+        return Destination == BreakDestination || Destination == ContinueDestination || Destination == NormalBreakDestination;
+    };
     while (Pos != Limit && Pos < P.Instructions.size())
     {
         E.Analysis.Spend();
@@ -358,15 +375,45 @@ std::vector<Statement> Function::Region(unsigned Start, unsigned End, int BreakT
             if (Finish > Limit)
                 throw Unstructured("loop leaves its containing region");
             unsigned ExitPc = Finish == P.Instructions.size() ? unsigned(P.Code.size()) : P.Instructions[Finish].Pc;
+            bool GuardDefault;
+            unsigned Continuation = LoopContinuation(Pos, Finish - 1, Limit, Out, GuardDefault);
+            int BreakPc = Continuation == Finish
+                              ? int(ExitPc)
+                              : int(Continuation == P.Instructions.size() ? P.Code.size() : P.Instructions[Continuation].Pc);
+            unsigned Completed = std::numeric_limits<unsigned>::max();
+            if (GuardDefault)
+            {
+                Completed = E.New("LoopCompleted", Id, true);
+                Out.push_back({Kind::Assign, {Completed}, "true"});
+            }
             Statement Loop{Kind::While, {}, "true"};
             if (auto Found = LoopReferenceHoists.find(I.Pc); Found != LoopReferenceHoists.end())
                 Loop.Lifetime.assign(Found->second.begin(), Found->second.end());
-            Loop.Body = Region(I.Pc, ExitPc, int(ExitPc), int(I.Pc), Level + 1, true);
+            // Inlined functions leave a while/repeat loop directly for their
+            // shared continuation, skipping an exhaustion default. Natural
+            // loops need the same default-hoisting/guard proof as native for.
+            Loop.Body = Region(I.Pc, ExitPc, BreakPc, int(I.Pc), Level + 1, true, Completed, int(ExitPc));
             if (Loop.Body.empty() ||
                 (Loop.Body.back().Type != Kind::Continue && Loop.Body.back().Type != Kind::Return && Loop.Body.back().Type != Kind::Break))
                 Loop.Body.push_back({Kind::Break});
             Out.push_back(std::move(Loop));
-            Pos = Finish;
+            if (GuardDefault && Continuation > Limit)
+            {
+                Statement Escaped{Kind::If, {}, "not " + Token(Completed)};
+                if (!ExitRoute(BreakPc, Escaped.Body))
+                    throw Unstructured("nested natural loop has an unsupported exit at " + std::to_string(BreakPc));
+                Out.push_back(std::move(Escaped));
+                Pos = Finish;
+                continue;
+            }
+            if (GuardDefault)
+            {
+                Statement Exhausted{Kind::If, {}, Token(Completed)};
+                Exhausted.Body =
+                    Region(ExitPc, unsigned(BreakPc), BreakTarget, ContinueTarget, Level + 1, false, BreakFlag, NormalBreakTarget);
+                Out.push_back(std::move(Exhausted));
+            }
+            Pos = Continuation;
             continue;
         }
         IgnoreBackedge = false;
@@ -743,7 +790,7 @@ std::vector<Statement> Function::Region(unsigned Start, unsigned End, int BreakT
                 for (unsigned Scan = LastTest + 1; Scan < Index(std::min(JoinPc, End)); ++Scan)
                 {
                     const auto &Edge = P.Instructions[Scan];
-                    if (Edge.Target() <= Target || Edge.Target() == BreakTarget || Edge.Target() == ContinueTarget)
+                    if (Edge.Target() <= Target || LoopExit(Edge.Target()))
                         continue;
                     const auto &Destination = P.Instructions[Index(unsigned(Edge.Target()))];
                     if (Destination.Op == LOP_RETURN)
@@ -753,7 +800,26 @@ std::vector<Statement> Function::Region(unsigned Start, unsigned End, int BreakT
                 int Post = Flow.PostDominators[Pos];
                 if (Post >= 0 && unsigned(Post) < P.Instructions.size() &&
                     P.Instructions[unsigned(Post)].Pc >= std::max(unsigned(Target), Fallthrough))
-                    JoinPc = std::min(JoinPc, P.Instructions[unsigned(Post)].Pc);
+                {
+                    unsigned PostPc = P.Instructions[unsigned(Post)].Pc;
+                    bool Crosses = false;
+                    // A loop's only exit may make an alternate arm postdominate
+                    // this test through a later iteration. Such a postdominator
+                    // cannot cut a current-iteration path that jumps beyond it.
+                    for (unsigned Scan = LastTest + 1; PostPc < JoinPc && Scan < std::min(unsigned(Post), Limit); ++Scan)
+                    {
+                        E.Analysis.Spend();
+                        const auto &Edge = P.Instructions[Scan];
+                        if (Edge.Target() > int(PostPc) && !LoopExit(Edge.Target()) &&
+                            P.Instructions[Index(unsigned(Edge.Target()))].Op != LOP_RETURN)
+                        {
+                            Crosses = true;
+                            break;
+                        }
+                    }
+                    if (!Crosses)
+                        JoinPc = std::min(JoinPc, PostPc);
+                }
                 JoinPc = std::min(JoinPc, End);
                 // A join cannot bisect a loop, including a loop whose exit was
                 // threaded past a jump. Expand to the physical loop boundary.

@@ -1,4 +1,5 @@
 #include "Reconstruction.hpp"
+#include <iterator>
 
 namespace Astra::Detail
 {
@@ -134,6 +135,20 @@ Function::Function(Engine &Owner, unsigned Proto, std::vector<Upvalue> Captures,
         if (R < P.Parameters)
             Parameters.push_back(Registers.back());
     }
+    // Debug locals can number in the thousands when a script reuses a few
+    // registers across many short scopes. Index definitions once instead of
+    // rescanning the complete function for every local's initializer.
+    std::vector<std::vector<unsigned>> LocalDefinitions(P.Locals.empty() ? 0 : P.Stack);
+    if (!P.Locals.empty())
+        for (const auto &I : P.Instructions)
+        {
+            auto Written = Writes(I, P);
+            E.Analysis.Spend(1 + Written.size());
+            for (unsigned R : Written)
+                LocalDefinitions[R].push_back(I.Pc);
+        }
+    LocalSymbols.reserve(P.Locals.size());
+    LocalStarts.reserve(P.Locals.size());
     for (const auto &L : P.Locals)
     {
         if (L.Start <= 1 && L.Register < P.Parameters)
@@ -144,21 +159,20 @@ Function::Function(Engine &Owner, unsigned Proto, std::vector<Upvalue> Captures,
         }
         unsigned Start = L.Start;
         // Debug ranges start after initialization. Include the last defining instruction in this local's lifetime.
-        for (auto It = P.Instructions.rbegin(); It != P.Instructions.rend(); ++It)
+        const auto &Definitions = LocalDefinitions[L.Register];
+        auto Definition = std::lower_bound(Definitions.begin(), Definitions.end(), L.Start);
+        if (Definition != Definitions.begin())
+            Start = *std::prev(Definition);
+        // Generic preparation is one word; its output locals start immediately
+        // after it and are initialized by the loop tail rather than a prior use
+        // of the same physical register.
+        int Before = L.Start ? P.AtPc(L.Start - 1) : -1;
+        if (Before >= 0)
         {
-            if (It->Pc >= L.Start)
-                continue;
-            auto Written = Writes(*It, P);
-            if (std::find(Written.begin(), Written.end(), L.Register) != Written.end())
-            {
-                Start = It->Pc;
-                break;
-            }
-        }
-        for (const auto &I : P.Instructions)
-            if ((I.Op == LOP_FORGPREP || I.Op == LOP_FORGPREP_NEXT || I.Op == LOP_FORGPREP_INEXT) && I.Next == L.Start &&
-                L.Register >= I.A + 3)
+            const auto &I = P.Instructions[unsigned(Before)];
+            if ((I.Op == LOP_FORGPREP || I.Op == LOP_FORGPREP_NEXT || I.Op == LOP_FORGPREP_INEXT) && L.Register >= I.A + 3)
                 Start = L.Start;
+        }
         LocalStarts.push_back(Start);
         LocalSymbols.push_back(Cells.count(L.Register) ? Registers[L.Register] : E.New(L.Name, Id, true, false, false, false, true));
     }

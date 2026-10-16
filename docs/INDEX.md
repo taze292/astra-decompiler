@@ -9,6 +9,7 @@ Astra turns Luau bytecode into readable source. Download the Windows release, st
 - [Use the CLI](SETUPS.md): individual bytecode files, batches, and integrations.
 - [Browse every option](OPTIONS.md): defaults, accepted values, and limits.
 - [Build from source](BUILDING.md): compile Astra yourself when you need to.
+- [0.5.1 reliability update](RELIABILITY_UPDATE.md): reconstruction fixes, bridge throughput, save integration, and validation.
 
 ## A local workflow
 

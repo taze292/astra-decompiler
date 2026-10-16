@@ -141,6 +141,8 @@ void Decode(Chunk &C, OpcodeEncoding Encoding)
                     auto Kind = LUAU_INSN_A(Capture), Index = LUAU_INSN_B(Capture);
                     if (Kind > LCT_UPVAL)
                         throw Error("Invalid capture kind");
+                    if (I.Op == LOP_DUPCLOSURE && Kind == LCT_REF)
+                        throw Error("DUPCLOSURE cannot capture a reference");
                     if (Kind == LCT_UPVAL)
                     {
                         if (Index >= P.Upvalues)
@@ -156,8 +158,11 @@ void Decode(Chunk &C, OpcodeEncoding Encoding)
             case LOP_CAPTURE:
                 throw Error("Orphan CAPTURE instruction");
             case LOP_LOADK:
-            case LOP_DUPTABLE:
                 K(unsigned(I.D));
+                break;
+            case LOP_DUPTABLE:
+                if (auto Tag = K(unsigned(I.D)).Tag; Tag != LBC_CONSTANT_TABLE && Tag != LBC_CONSTANT_TABLE_WITH_CONSTANTS)
+                    throw Error("DUPTABLE needs a table template constant");
                 break;
             case LOP_LOADKX:
                 K(I.Aux);
@@ -178,7 +183,8 @@ void Decode(Chunk &C, OpcodeEncoding Encoding)
                     throw Error("Expected userdata member name");
                 break;
             case LOP_GETIMPORT:
-                K(unsigned(I.D));
+                if (K(unsigned(I.D)).Tag != LBC_CONSTANT_IMPORT)
+                    throw Error("GETIMPORT needs an import constant");
                 if (!(I.Aux >> 30))
                     throw Error("Empty import path");
                 for (unsigned J = 0; J < (I.Aux >> 30); ++J)
@@ -208,6 +214,13 @@ void Decode(Chunk &C, OpcodeEncoding Encoding)
             case LOP_SETUPVAL:
                 if (I.B >= P.Upvalues)
                     throw Error("Upvalue index out of range");
+                break;
+            case LOP_FASTCALL2K:
+                K(I.Aux);
+                break;
+            case LOP_NEWCLASS:
+                if (K(I.Aux).Tag != LBC_CONSTANT_CLASS_SHAPE)
+                    throw Error("NEWCLASS needs a class shape constant");
                 break;
             default:
                 break;
@@ -327,6 +340,27 @@ void Decode(Chunk &C, OpcodeEncoding Encoding)
                 if (!(I.Aux & 255))
                     throw Error("Empty generic loop");
                 break;
+            case LOP_FASTCALL1:
+            case LOP_FASTCALL2K:
+                Reg(I.B);
+                break;
+            case LOP_FASTCALL2:
+                Reg(I.B);
+                Reg(I.Aux & 255);
+                break;
+            case LOP_FASTCALL3:
+                Reg(I.B);
+                Reg(I.Aux & 255);
+                Reg((I.Aux >> 8) & 255);
+                break;
+            case LOP_NEWCLASSMEMBER:
+                Reg(I.A);
+                Reg(I.C);
+                break;
+            case LOP_NEWCLASS:
+                if (I.B != 255)
+                    Reg(I.B);
+                break;
             default:
                 break;
             }
@@ -337,7 +371,10 @@ void Decode(Chunk &C, OpcodeEncoding Encoding)
         for (const auto &I : P.Instructions)
         {
             auto Target = I.Target();
-            if (Target != -1 && (Target < 0 || P.AtPc(unsigned(Target)) < 0))
+            // -1 is also a possible (invalid) encoded destination. Determine
+            // whether this is a jump from the opcode, not the target sentinel.
+            bool HasTarget = Luau::isJumpD(I.Op) || I.Op == LOP_JUMPX || (I.Op == LOP_LOADB && I.C);
+            if (HasTarget && (Target < 0 || P.AtPc(unsigned(Target)) < 0))
                 throw Error("Jump target is outside code or inside AUX/CAPTURE words at PC " + std::to_string(I.Pc));
             if (Luau::isFastCall(I.Op))
             {
@@ -460,6 +497,7 @@ Chunk ReadBytecode(std::string_view Data, const Options &Settings)
     }
     std::vector<std::string> Strings(1);
     unsigned StringCount = R.Count();
+    Strings.reserve(std::size_t(StringCount) + 1);
     for (unsigned I = 0; I < StringCount; ++I)
     {
         unsigned Length = unsigned(R.Var());
@@ -478,6 +516,7 @@ Chunk ReadBytecode(std::string_view Data, const Options &Settings)
     unsigned ProtoCount = R.Count(8);
     if (!ProtoCount)
         R.Fail("missing main prototype");
+    C.Prototypes.reserve(ProtoCount);
     for (unsigned Id = 0; Id < ProtoCount; ++Id)
     {
         unsigned ProtoSize = C.Version >= 12 ? unsigned(R.Var()) : 0;
@@ -498,9 +537,11 @@ Chunk ReadBytecode(std::string_view Data, const Options &Settings)
             R.Take(std::size_t(TypeSize));
         }
         unsigned CodeCount = R.Count(4);
+        P.Code.reserve(CodeCount);
         for (unsigned J = 0; J < CodeCount; ++J)
             P.Code.push_back(R.Read<std::uint32_t>());
         unsigned ConstantCount = R.Count();
+        P.Constants.reserve(ConstantCount);
         for (unsigned J = 0; J < ConstantCount; ++J)
         {
             Constant K;
@@ -557,11 +598,18 @@ Chunk ReadBytecode(std::string_view Data, const Options &Settings)
             case LBC_CONSTANT_CLASS_SHAPE:
             {
                 K.Index = unsigned(R.Var());
+                if (K.Index >= J || P.Constants[K.Index].Tag != LBC_CONSTANT_STRING)
+                    R.Fail("invalid class name constant");
                 unsigned Properties = unsigned(R.Var()), Methods = unsigned(R.Var());
                 if (std::uint64_t(Properties) + Methods > 1000000)
                     R.Fail("class shape too large");
                 for (unsigned N = 0; N < Properties + Methods; ++N)
-                    K.Entries.emplace_back(unsigned(R.Var()), N < Properties ? 0 : 1);
+                {
+                    unsigned Member = unsigned(R.Var());
+                    if (Member >= J || P.Constants[Member].Tag != LBC_CONSTANT_STRING)
+                        R.Fail("invalid class member name constant");
+                    K.Entries.emplace_back(Member, N < Properties ? 0 : 1);
+                }
                 break;
             }
             default:
@@ -569,7 +617,23 @@ Chunk ReadBytecode(std::string_view Data, const Options &Settings)
             }
             P.Constants.push_back(std::move(K));
         }
+        // Import pre-resolution may leave a nil cache when its path strings
+        // occur later in the pool; GETIMPORT resolves that path at runtime.
+        // Validate against the complete pool without imposing compiler order.
+        for (const auto &K : P.Constants)
+            if (K.Tag == LBC_CONSTANT_IMPORT)
+            {
+                if (!(K.Index >> 30))
+                    R.Fail("empty import constant path");
+                for (unsigned N = 0; N < (K.Index >> 30); ++N)
+                {
+                    unsigned Part = (K.Index >> (20 - 10 * N)) & 1023;
+                    if (Part >= P.Constants.size() || P.Constants[Part].Tag != LBC_CONSTANT_STRING)
+                        R.Fail("invalid import constant path");
+                }
+            }
         unsigned ChildCount = R.Count();
+        P.Children.reserve(ChildCount);
         for (unsigned J = 0; J < ChildCount; ++J)
         {
             auto Child = unsigned(R.Var());
@@ -585,6 +649,7 @@ Chunk ReadBytecode(std::string_view Data, const Options &Settings)
             if (Gap > 31 || !CodeCount)
                 R.Fail("invalid line info interval");
             std::uint8_t Delta = 0;
+            P.Lines.reserve(CodeCount);
             for (unsigned J = 0; J < CodeCount; ++J)
             {
                 Delta = std::uint8_t(Delta + R.Read<std::uint8_t>());
@@ -605,6 +670,7 @@ Chunk ReadBytecode(std::string_view Data, const Options &Settings)
         if (R.Read<std::uint8_t>())
         {
             unsigned LocalCount = R.Count(4);
+            P.Locals.reserve(LocalCount);
             for (unsigned J = 0; J < LocalCount; ++J)
             {
                 Local L;
@@ -619,6 +685,7 @@ Chunk ReadBytecode(std::string_view Data, const Options &Settings)
             unsigned UpvalueCount = R.Count();
             if (UpvalueCount != P.Upvalues)
                 R.Fail("invalid debug upvalue count");
+            P.UpvalueNames.reserve(UpvalueCount);
             for (unsigned J = 0; J < UpvalueCount; ++J)
                 P.UpvalueNames.push_back(String());
         }

@@ -63,7 +63,7 @@ Do not use diagnostic fallback to hide a failed regression case. A generated fil
 ./dev/tools/PackageRelease.ps1
 ```
 
-This writes the Windows ZIP, standalone executable, bridge, and SHA-256 checksums to `artifacts/releases/v0.5.0/`. Both copies of `Decompile.luau` contain the actual matching public bridge, so installation needs no download, published tag, or push. The optional online loader remains at [`tools/LoadDecompiler.luau`](../tools/LoadDecompiler.luau).
+This writes the Windows ZIP, standalone executable, bridge, and SHA-256 checksums to `artifacts/releases/v0.5.1/`. Both copies of `Decompile.luau` contain the actual matching public bridge, so installation needs no download, published tag, or push. The optional online loader remains at [`tools/LoadDecompiler.luau`](../tools/LoadDecompiler.luau).
 
 ## Live checks and documentation
 

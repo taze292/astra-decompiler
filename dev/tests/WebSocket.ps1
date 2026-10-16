@@ -35,6 +35,12 @@ function Send-Text($Socket, [string]$Text, [bool]$Final = $true) {
     finally { $Deadline.Dispose() }
 }
 
+function Send-Binary($Socket, [byte[]]$Bytes, [bool]$Final = $true) {
+    $Deadline = [Threading.CancellationTokenSource]::new(10000)
+    try { $null = $Socket.SendAsync([ArraySegment[byte]]::new($Bytes), [Net.WebSockets.WebSocketMessageType]::Binary, $Final, $Deadline.Token).GetAwaiter().GetResult() }
+    finally { $Deadline.Dispose() }
+}
+
 function Receive-Text($Socket) {
     $Buffer = [byte[]]::new(16384)
     $Output = [IO.MemoryStream]::new()
@@ -57,6 +63,7 @@ function Fixture([string]$Name, [string]$Source) {
     & $Executable --header false "$Path.luac" -o "$Path.expected.luau"
     if ($LASTEXITCODE) { throw 'CLI decompilation failed' }
     return @{
+        Bytes = [IO.File]::ReadAllBytes("$Path.luac")
         Hex = [BitConverter]::ToString([IO.File]::ReadAllBytes("$Path.luac")).Replace('-', '')
         Source = [IO.File]::ReadAllText("$Path.expected.luau")
     }
@@ -94,6 +101,16 @@ try {
     $Large = Fixture 'large' ('return "' + ('a' * 70000) + '"')
     $Module = Fixture 'module' 'local M={}; function M.Read() return 17 end; return M'
     $Socket = Connect-Bridge
+    $BinaryHeader = [Text.Encoding]::ASCII.GetBytes("95`nASTRA5`nLine`n`n{}`n")
+    $BinaryBytes = $Small.Bytes
+    Send-Binary $Socket ([byte[]]($BinaryHeader + $BinaryBytes))
+    Check ((Receive-Text $Socket) -ceq ("95`nok`n" + $Small.Source)) 'Raw binary bytecode changed the output'
+    $BinaryHeader = [Text.Encoding]::ASCII.GetBytes("96`nASTRA5`nLine`n`n{}`n")
+    Send-Binary $Socket $BinaryHeader $false
+    Send-Binary $Socket $BinaryBytes
+    Check ((Receive-Text $Socket) -ceq ("96`nok`n" + $Small.Source)) 'Fragmented raw binary request failed'
+    Send-Binary $Socket ([Text.Encoding]::ASCII.GetBytes("97`nASTRA5`nLine`n`n{`"MaxInputBytes`":1}`ninvalid"))
+    Check ((Receive-Text $Socket).StartsWith("97`nerror`n")) 'Raw binary input cap ignored'
     $JsonOptions = '{"casing":"snake","header":true,"require-locators":false,"gc-locators":true}'
     Send-Text $Socket ("90`nASTRA4`nLine`n`n$JsonOptions`n" + $Module.Hex)
     $JsonReply = Receive-Text $Socket
@@ -150,6 +167,20 @@ try {
     Check ((Receive-Text $Socket).StartsWith("43`nerror`n")) 'Multiline module-path injection was accepted'
     Send-Text $Socket ("5`n" + $Large.Hex)
     Check ((Receive-Text $Socket) -ceq ("5`nok`n" + $Large.Source)) '64-bit frame length or large response failed'
+    $ExpectedReplies = @{}
+    for ($Index = 0; $Index -lt 32; $Index++) {
+        $Id = 200 + $Index
+        $Input = if ($Index % 2) { $Small } else { $Large }
+        $ExpectedReplies["$Id"] = "$Id`nok`n" + $Input.Source
+        Send-Text $Socket ("$Id`n" + $Input.Hex)
+    }
+    for ($Index = 0; $Index -lt 32; $Index++) {
+        $Reply = Receive-Text $Socket
+        $Id = $Reply.Split("`n", 2)[0]
+        Check ($ExpectedReplies.ContainsKey($Id) -and $Reply -ceq $ExpectedReplies[$Id]) 'Pipelined response was lost, duplicated, interleaved, or misrouted'
+        $ExpectedReplies.Remove($Id)
+    }
+    Check ($ExpectedReplies.Count -eq 0) 'Pipelined requests did not all complete'
     $Other = Connect-Bridge
     Send-Text $Socket ("6`n" + $Small.Hex)
     Send-Text $Other ("6`n" + $Large.Hex)

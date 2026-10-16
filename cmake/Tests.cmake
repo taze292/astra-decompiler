@@ -29,6 +29,9 @@ set_tests_properties(ControlFlowStress PROPERTIES TIMEOUT 120)
 astra_add_vm_test(astra-inline-recovery-tests InlineRecoveryTests.cpp InlineRecovery)
 set_tests_properties(InlineRecovery PROPERTIES TIMEOUT 30)
 
+astra_add_vm_test(astra-core-validation-tests CoreValidationTests.cpp CoreValidation)
+set_tests_properties(CoreValidation PROPERTIES TIMEOUT 30)
+
 add_executable(astra-compile dev/tools/Compile.cpp)
 target_link_libraries(astra-compile PRIVATE Luau.Compiler Luau.VM)
 

@@ -1,5 +1,9 @@
 # Rewrite measurements
 
+## Reliability and bridge throughput — 2026-10-16
+
+Cold 128-script bridge batches improved from 1.8884 to 1.5518 seconds with one caller and from 0.4556 to 0.3200 seconds with 16 callers. A repeated final-package batch returned 128 cache hits in 0.0087 seconds after a 0.4492-second cold call. These are local subset measurements; Volt's native save path bypasses the Lua hook. See the [0.5.1 reliability update](RELIABILITY_UPDATE.md) for methodology, integration limits, core measurements, and validation.
+
 ## Astra formatting update — 2026-10-15
 
 Three alternating-order 301-sample runs against `a18b706` measured 4.5969 → 4.8485 ms for captured CameraModule, 8.3119 → 8.3730 ms for the generated corpus, and 1.0935 → 1.0823 ms for the loader guard fixture. The new formatting work has a small measured cost on CameraModule; no universal speedup is claimed. The finalizer retains tokens only inside table constructors and avoids rebuilding unchanged source. See [Astra validation](ASTRA_VALIDATION.md) for methodology, full results, and live checks. Earlier entries describe previous milestones.

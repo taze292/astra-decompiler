@@ -126,6 +126,134 @@ local function run(values,target)
 end
 return run(nil,9),run({},9),run({1,2,3},2),run({1,2,3},9)
 )"},
+        {"universal_inlined_while_lookup_default", R"(
+local function find(node)
+    while node do
+        if node.value then return node.value end
+        node=node.parent
+    end
+    return nil
+end
+local function run(node)
+    local value=find(node)
+    if value then return value+3 end
+    return -1
+end
+return run(nil),run({value=2}),run({parent={value=7}}),run({parent={}})
+)"},
+        {"universal_inlined_while_effectful_exhaustion", R"(
+local log=''
+local function exhausted(value) log..='e' return value+10 end
+local function find(node)
+    local count=0
+    while node do
+        count+=1
+        if node.value then return count end
+        node=node.parent
+    end
+    return exhausted(count)
+end
+local function run(node)
+    local value=find(node)
+    if value>3 then log..='n' else log..='y' end
+    return value
+end
+local a,b,c,d=run(nil),run({value=2}),run({parent={value=7}}),run({parent={}})
+return a,b,c,d,log
+)"},
+        {"universal_inlined_repeat_lookup_default", R"(
+local function find(values,needle)
+    local index=0
+    repeat
+        index+=1
+        if values[index]==needle then return index end
+    until index>=#values
+    return nil
+end
+local function run(values,needle)
+    local index=find(values,needle)
+    if index then return index*3 end
+    return -1
+end
+return run({1,2,3},1),run({1,2,3},3),run({1,2,3},9)
+)"},
+        {"universal_inlined_nested_while_exit", R"(
+local function find(groups,needle)
+    local outer=1
+    while outer<=#groups do
+        local inner=1
+        while inner<=#groups[outer] do
+            if groups[outer][inner]==needle then return outer*10+inner end
+            inner+=1
+        end
+        outer+=1
+    end
+    return nil
+end
+local function run(needle)
+    local result=find({{1,2},{3,4}},needle)
+    if result then return result+100 end
+    return -1
+end
+return run(1),run(2),run(3),run(4),run(5)
+)"},
+        {"universal_while_exit_after_nested_branch", R"(
+local function run(kinds,modes)
+    local index,total=0,0
+    while true do
+        index+=1
+        local kind,mode=kinds[index],modes[index]
+        if kind=='a' then
+            total+=1
+            if mode=='b' then total+=10 elseif mode=='c' then total+=20 end
+        elseif kind~=nil and kind>0 then total+=2
+        else break end
+        if mode then total+=100 else total+=1000 end
+    end
+    return index,total
+end
+local a,b=run({'a','a',7},{'b','c'})
+local c,d=run({7,'a'},{'c','x'})
+local e,f=run({},{})
+return a,b,c,d,e,f
+)"},
+        {"universal_tree_walk_shared_continuation", R"(
+local log=''
+local function visit(root,hidden)
+    local node=root
+    while true do
+        if node.tag==1 then
+            if hidden then log..='h1' else log..='u1' end
+        elseif node.tag==2 then
+            if hidden then log..='h2' else log..='u2' end
+        elseif (node.tag==3 or node.tag==4) and node.hidden~=nil and node~=root then
+        elseif node.child~=nil then
+            node.child.parent=node
+            node=node.child
+            continue
+        end
+        if node==root then return end
+        while node.sibling==nil do
+            if node.parent==nil or node.parent==root then return end
+            node=node.parent
+        end
+        node.sibling.parent=node.parent
+        node=node.sibling
+    end
+end
+local root={tag=0}
+local first={tag=1,child={tag=2}}
+local second={tag=2}
+local third={tag=0,child={tag=1,sibling={tag=2}}}
+local fourth={tag=3,hidden=false,child={tag=1}}
+root.child=first
+first.sibling=second
+second.sibling=third
+third.sibling=fourth
+visit(root,false)
+visit(root,true)
+return log
+)"},
         {"universal_predicate_dag_metamethod_order", R"(
 local log=''
 local meta={__eq=function(a,b) log..=a.name..b.name..',' return a.value==b.value end}

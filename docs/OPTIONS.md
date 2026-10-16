@@ -100,6 +100,10 @@ getgenv().AstraConfig = {
     Url = "ws://127.0.0.1:8877/decompile",
     Timeout = 30,
     MaxPending = 32,
+    MaxQueued = 16384,
+    Concurrency = 8,
+    BinaryTransport = true,
+    CacheBytes = 32 * 1024 * 1024,
     ErrorMode = "silent", -- or "raise"
 }
 getgenv().AstraOptions = {
@@ -131,7 +135,7 @@ local Details = getgenv().AstraBridge.LastRequest
 
 Each call snapshots `getgenv().AstraOptions`, then overlays `AstraConfig.Options` and per-call options. Input tables are never mutated. Edit or replace `AstraOptions` between requests without reinstalling. Missing fields use the documented defaults. Resource limits can be reduced per request, but cannot exceed server limits. `ModulePath` and `FilterLineField` are supplied automatically by the bridge.
 
-`Url`, `Timeout`, and `MaxPending` are captured at installation; reinstall to change connection settings. `Options` and `ErrorMode` are read from the current configuration table on each call. `MaxPending` is 1–128. A timeout stops waiting and releases the pending slot; it does not cancel C++ work already running.
+`Url`, `Timeout`, `MaxPending`, `MaxQueued`, `Concurrency`, `BinaryTransport`, and `CacheBytes` are captured at installation; reinstall to change them. `Options` and `ErrorMode` are read from the current configuration table on each call. `MaxPending` is 1–128 and limits active calls. Additional calls wait for a slot within their timeout before extracting bytecode. `MaxQueued` bounds these waiting callers (0–65,536; default 16,384); 0 rejects calls when all active slots are occupied. `Concurrency` is 1–MaxPending and defaults to the smaller of 8 and MaxPending. It controls `DecompileMany` and `PrepareSave` workers. `BinaryTransport=true` uses binary ASTRA5 requests; false selects text ASTRA4. `CacheBytes` is 0–256 MiB, defaults to 32 MiB, and bounds retained bytecode plus source across at most 8,192 entries; 0 disables caching. A timeout stops waiting and releases the pending slot; it does not cancel C++ work already running.
 
 Module paths come from the live instance hierarchy. Unique descendants can use `FindFirstChild("Name", true)`; ambiguous names retain explicit paths or omit require locators. No module is required or executed during decompilation.
 
@@ -146,7 +150,11 @@ Time is measured inside the C++ decompiler from decoding through finalization, i
 
 Failures return nil by default. Inspect `AstraBridge.LastError` and `LastRequest.Succeeded/Error/ElapsedSeconds`; successful calls clear LastError and also report input/output sizes, resolved options, module-path status, GC/require counts, and line field. These fields describe the last completed call, so concurrent callers should use their own returned source. `ErrorMode="raise"` makes failures raise instead. Installation failures still return nil without replacing the original decompiler.
 
-`AstraBridge.Decompile` is a direct entry point. `AstraBridge.Stop()` disconnects and restores the previous decompiler. A slow request can delay later requests on the same connection.
+`AstraBridge.Decompile` is a direct entry point and accepts either a script or raw bytecode. Failures also return their error as a second value in silent mode. Volt's native `DecompilerOptions` values are accepted for executor integrations. Astra translates `SmartVariableRenamer`, formatter indentation, and supported metadata switches; `LastRequest.IgnoredNativeOptions` lists native settings without an equivalent. Astra tables still use strict validation.
+
+`AstraBridge.DecompileMany(Targets, Timeout, Overrides)` returns an ordered array of `{ Source = ..., Error = ... }` records. `AstraBridge.PrepareSave(Roots, Timeout, Overrides)` accepts an Instance or root array, inventories scripts, and returns the same records plus the target array. Server-context Scripts are skipped. `AstraBridge.ClearCache()` releases cached results. `AstraBridge.Stop()` disconnects, clears the cache, wakes pending calls, and restores the previous decompiler.
+
+`LastRequest.CacheHit` and `Protocol` report reuse and transport. `AstraBridge.Stats` records request, success, failure, cache-hit, and transferred-byte counts. Responses for different requests can arrive out of order. These status fields describe the last completed call; concurrent callers should use their own return values.
 
 ## CLI and batch controls
 

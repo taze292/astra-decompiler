@@ -11,12 +11,18 @@
 #include <atomic>
 #include <bcrypt.h>
 #include <cctype>
+#include <condition_variable>
+#include <deque>
+#include <functional>
 #include <iostream>
 #include <map>
+#include <memory>
+#include <mutex>
 #include <set>
 #include <sstream>
 #include <syncstream>
 #include <thread>
+#include <vector>
 
 namespace Astra
 {
@@ -173,6 +179,115 @@ void Frame(SOCKET Client, unsigned Opcode, std::string_view Payload)
     Send(Client, Payload);
 }
 
+// Share CPU workers across connections. The receive loop must stay available for
+// other requests, pings and disconnects while a script is being reconstructed.
+class Jobs
+{
+    std::mutex Mutex;
+    std::condition_variable Ready;
+    std::deque<std::pair<std::size_t, std::function<void()>>> Queue;
+    std::vector<std::thread> Workers;
+    std::size_t Bytes = 0;
+    std::size_t Count = 0;
+    bool Stopping = false;
+
+public:
+    Jobs()
+    {
+        auto ThreadCount = std::clamp(std::thread::hardware_concurrency(), 1u, 16u);
+        try
+        {
+            for (unsigned I = 0; I < ThreadCount; ++I)
+                Workers.emplace_back([this]()
+                {
+                    for (;;)
+                    {
+                        std::pair<std::size_t, std::function<void()>> Job;
+                        {
+                            std::unique_lock Lock(Mutex);
+                            Ready.wait(Lock, [&]() { return Stopping || !Queue.empty(); });
+                            if (Stopping && Queue.empty())
+                                return;
+                            Job = std::move(Queue.front());
+                            Queue.pop_front();
+                        }
+                        Job.second();
+                        {
+                            std::lock_guard Lock(Mutex);
+                            Bytes -= Job.first;
+                            --Count;
+                        }
+                    }
+                });
+        }
+        catch (...)
+        {
+            {
+                std::lock_guard Lock(Mutex);
+                Stopping = true;
+            }
+            Ready.notify_all();
+            for (auto &Worker : Workers)
+                Worker.join();
+            throw;
+        }
+    }
+    ~Jobs()
+    {
+        {
+            std::lock_guard Lock(Mutex);
+            Stopping = true;
+        }
+        Ready.notify_all();
+        for (auto &Worker : Workers)
+            Worker.join();
+    }
+    bool Submit(std::size_t Size, std::function<void()> Job)
+    {
+        std::lock_guard Lock(Mutex);
+        // Account for running jobs too; one connection cannot allocate an
+        // unbounded backlog by sending faster than the decompiler can run.
+        if (Stopping || Count >= 128 || Size > 256 * 1024 * 1024 - Bytes)
+            return false;
+        Queue.emplace_back(Size, std::move(Job));
+        Bytes += Size;
+        ++Count;
+        Ready.notify_one();
+        return true;
+    }
+};
+
+struct SessionState
+{
+    Socket Client;
+    std::mutex SendMutex;
+    std::mutex PendingMutex;
+    std::set<std::string> Pending;
+    std::atomic<bool> Closed = false;
+
+    explicit SessionState(SOCKET Client) : Client(Client) {}
+    void Close()
+    {
+        if (!Closed.exchange(true))
+            shutdown(Client.Value, SD_BOTH);
+    }
+    void SendFrame(unsigned Opcode, std::string_view Payload)
+    {
+        std::lock_guard Lock(SendMutex);
+        if (!Closed)
+            Frame(Client.Value, Opcode, Payload);
+    }
+};
+
+std::string RequestId(std::string_view Request)
+{
+    auto Newline = Request.find('\n');
+    if (Newline == std::string_view::npos || Newline == 0 || Newline > 16 ||
+        !std::all_of(Request.begin(), Request.begin() + Newline, [](unsigned char C) { return C >= '0' && C <= '9'; }))
+        throw Error("Expected numeric request ID followed by bytecode");
+    return std::string(Request.substr(0, Newline));
+}
+
 // Restricted JSON options object: keys and string enum values use ASCII words,
 // booleans and unsigned integers keep their types. No executable Luau is parsed.
 void JsonOptions(Options &Settings, std::string_view Text)
@@ -238,12 +353,8 @@ void JsonOptions(Options &Settings, std::string_view Text)
 
 std::string Process(std::string_view Request, const Options &Settings)
 {
-    auto Newline = Request.find('\n');
-    if (Newline == std::string_view::npos || Newline == 0 || Newline > 16 ||
-        !std::all_of(Request.begin(), Request.begin() + Newline, [](unsigned char C) { return C >= '0' && C <= '9'; }))
-        throw Error("Expected request ID followed by hex bytecode");
-    std::string Id(Request.substr(0, Newline));
-    Request.remove_prefix(Newline + 1);
+    std::string Id = RequestId(Request);
+    Request.remove_prefix(Id.size() + 1);
     try
     {
         Options RequestSettings = Settings;
@@ -266,7 +377,8 @@ std::string Process(std::string_view Request, const Options &Settings)
                 Bytes[I] = char((Digit(Hex[I * 2]) << 4) | Digit(Hex[I * 2 + 1]));
             return Bytes;
         };
-        bool Json = Request.starts_with("ASTRA4\n");
+        bool Binary = Request.starts_with("ASTRA5\n");
+        bool Json = Binary || Request.starts_with("ASTRA4\n");
         bool HasOptions = Json || Request.starts_with("ASTRA3\n");
         if (HasOptions || Request.starts_with("ASTRA2\n"))
         {
@@ -316,7 +428,9 @@ std::string Process(std::string_view Request, const Options &Settings)
         if (Request.empty())
             throw Error("Empty bytecode payload");
         ValidateOptions(RequestSettings);
-        auto Bytes = Decode(Request, RequestSettings.MaxInputBytes);
+        if (Binary && Request.size() > RequestSettings.MaxInputBytes)
+            throw Error("Bytecode exceeds input byte limit");
+        auto Bytes = Binary ? std::string(Request) : Decode(Request, RequestSettings.MaxInputBytes);
         auto Result = Decompile(Bytes, RequestSettings);
         std::osyncstream(std::cout) << "Request " << Id << ": " << Bytes.size() << " bytecode bytes -> " << Result.Source.size()
                                     << " source bytes, " << Result.StateMachineFunctions << " fallback functions\n";
@@ -328,8 +442,9 @@ std::string Process(std::string_view Request, const Options &Settings)
     }
 }
 
-void Session(SOCKET Client, const Options &Settings)
+void Session(const std::shared_ptr<SessionState> &State, const Options &Settings, Jobs &Scheduler)
 {
+    SOCKET Client = State->Client.Value;
     DWORD Timeout = 10000;
     setsockopt(Client, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char *>(&Timeout), sizeof(Timeout));
     setsockopt(Client, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char *>(&Timeout), sizeof(Timeout));
@@ -338,6 +453,7 @@ void Session(SOCKET Client, const Options &Settings)
     setsockopt(Client, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char *>(&Timeout), sizeof(Timeout));
     std::string Message;
     bool Fragmented = false;
+    unsigned MessageOpcode = 0;
     for (;;)
     {
         std::array<unsigned char, 2> Header{};
@@ -375,26 +491,81 @@ void Session(SOCKET Client, const Options &Settings)
         {
             if (Payload.size() == 1)
                 throw Error("Invalid close payload");
-            Frame(Client, 8, std::string_view("\x03\xe8", 2));
+            State->SendFrame(8, std::string_view("\x03\xe8", 2));
             return;
         }
         if (Opcode == 9)
         {
-            Frame(Client, 10, Payload);
+            State->SendFrame(10, Payload);
             continue;
         }
         if (Opcode == 10)
             continue;
-        if (Opcode != 0 && Opcode != 1)
-            throw Error("Only text requests are supported");
+        if (Opcode != 0 && Opcode != 1 && Opcode != 2)
+            throw Error("Unsupported WebSocket data opcode");
         if ((Opcode == 0) != Fragmented)
             throw Error("Unexpected continuation or data frame");
+        if (Opcode != 0)
+            MessageOpcode = Opcode;
         Message += Payload;
         Fragmented = !Final;
         if (Final)
         {
-            Frame(Client, 1, Process(Message, Settings));
-            Message.clear();
+            auto Id = RequestId(Message);
+            if (MessageOpcode == 2 && !std::string_view(Message).substr(Id.size() + 1).starts_with("ASTRA5\n"))
+                throw Error("Binary requests require ASTRA5 metadata");
+            {
+                std::lock_guard Lock(State->PendingMutex);
+                if (State->Pending.contains(Id))
+                    throw Error("Duplicate in-flight request ID");
+                if (State->Pending.size() >= 128)
+                {
+                    State->SendFrame(1, Id + "\nerror\nAstra pending request limit reached");
+                    Message.clear();
+                    continue;
+                }
+                State->Pending.insert(Id);
+            }
+            auto Size = Message.size();
+            auto Work = [State, Settings, Id, Request = std::move(Message)]()
+            {
+                bool Retired = false;
+                try
+                {
+                    if (!State->Closed)
+                    {
+                        auto Response = Process(Request, Settings);
+                        {
+                            std::lock_guard Lock(State->PendingMutex);
+                            State->Pending.erase(Id);
+                            Retired = true;
+                        }
+                        // Never hold admission state while writing: a client
+                        // may pipeline requests before it starts reading large
+                        // replies, so the receive loop must keep draining it.
+                        State->SendFrame(1, Response);
+                    }
+                }
+                catch (const std::exception &Failure)
+                {
+                    State->Close();
+                    std::osyncstream(std::cerr) << "astra: " << Failure.what() << '\n';
+                }
+                if (!Retired)
+                {
+                    std::lock_guard Lock(State->PendingMutex);
+                    State->Pending.erase(Id);
+                }
+            };
+            if (!Scheduler.Submit(Size, std::move(Work)))
+            {
+                {
+                    std::lock_guard Lock(State->PendingMutex);
+                    State->Pending.erase(Id);
+                }
+                State->SendFrame(1, Id + "\nerror\nAstra server queue is full; retry with fewer concurrent requests");
+            }
+            Message = {};
         }
     }
 }
@@ -431,6 +602,8 @@ int ServeWebSocket(unsigned Port, const Options &Settings)
               << "/decompile\nRun tools/Decompile.luau in your executor. Ctrl+C stops the server.\n"
               << std::flush;
     static std::atomic<unsigned> Clients = 0;
+    // Retained with the detached sessions until the process exits.
+    auto Scheduler = std::make_shared<Jobs>();
     for (;;)
     {
         SOCKET Client = accept(Listener.Value, nullptr, nullptr);
@@ -442,12 +615,15 @@ int ServeWebSocket(unsigned Port, const Options &Settings)
             closesocket(Client);
             continue;
         }
+        std::shared_ptr<SessionState> State;
         try
         {
+            BOOL NoDelay = TRUE;
+            setsockopt(Client, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char *>(&NoDelay), sizeof(NoDelay));
+            State = std::make_shared<SessionState>(Client);
             std::thread(
-                [Client, Settings]()
+                [State, Scheduler, Settings]()
                 {
-                    Socket Owned(Client);
                     struct Release
                     {
                         ~Release()
@@ -457,26 +633,30 @@ int ServeWebSocket(unsigned Port, const Options &Settings)
                     } Release;
                     try
                     {
-                        Session(Client, Settings);
+                        Session(State, Settings, *Scheduler);
                     }
                     catch (const std::exception &Failure)
                     {
                         try
                         {
-                            Frame(Client, 8, std::string_view("\x03\xea", 2));
+                            State->SendFrame(8, std::string_view("\x03\xea", 2));
                         }
                         catch (...)
                         {
                         }
                         std::osyncstream(std::cerr) << "astra: " << Failure.what() << '\n';
                     }
+                    State->Close();
                 })
                 .detach();
         }
         catch (...)
         {
             --Clients;
-            closesocket(Client);
+            if (State)
+                State->Close();
+            else
+                closesocket(Client);
             throw;
         }
     }

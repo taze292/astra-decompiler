@@ -41,11 +41,19 @@ Source reconstruction completes before ordinary CLI output is opened. Batch pref
 
 `DecompileBatch` uses an atomic next-input index and at most the configured number of workers. Each worker writes a unique result slot. A joined `jthread` lifetime prevents workers from outliving input views, including when later thread creation throws. There is no shared Luau VM in the decompiler. Compiler/VM test execution remains separate from concurrent decompilation.
 
-The Windows server already handled distinct clients on separate threads; that model is retained. Messages on a single socket remain serial, avoiding response interleaving and unbounded work queues. The Luau wrapper matches request IDs and bounds outstanding calls. For CPU throughput across a known file corpus, use the batch API/CLI.
+The Windows server accepts distinct clients on separate receive threads and schedules independent requests on a shared pool of 1–16 workers, selected from the available logical processors. Idle workers sleep on a condition variable. Queue accounting includes running work and caps the server at 128 jobs and 256 MiB of request payloads. Each connection also limits outstanding IDs to 128. Responses can complete out of order; a per-connection send lock keeps frames intact. Closed sessions discard queued work before reconstruction begins.
+
+The Luau wrapper matches request IDs, bounds outstanding calls, and resumes waiting coroutines on responses, timeout, or disconnect. Its bounded source cache validates bytecode, serialized options, locator path, and line-field metadata before reuse. `DecompileMany` schedules bounded concurrent calls and preserves input order; `PrepareSave` inventories client-visible scripts under selected roots before using that API. The cache is a bridge optimization, separate from request-local C++ reconstruction state.
 
 ## Bridge wire protocol
 
-All payloads are text frames. IDs are 1–16 decimal digits. Hex encoding preserves arbitrary bytecode bytes.
+IDs are 1–16 decimal digits. Bridge v9 defaults to binary ASTRA5 request frames, preserving arbitrary bytes without Lua hex encoding:
+
+```text
+RequestId\nASTRA5\nLineField\nHexModulePath\nJsonOptions\nRawBytecode
+```
+
+`BinaryTransport=false` uses the ASTRA4 text form:
 
 ```text
 RequestId\nASTRA4\nLineField\nHexModulePath\nJsonOptions\nHexBytecode
@@ -53,7 +61,7 @@ RequestId\nASTRA4\nLineField\nHexModulePath\nJsonOptions\nHexBytecode
 
 The options object is at most 4,096 bytes and contains scalar string, Boolean, or unsigned integer values. Its restricted JSON grammar accepts ASCII option identifiers/enum words, not escapes, nesting, null, or arbitrary expressions. Duplicate, unknown, reserved, and invalid options fail the request. Metadata paths are at most 8,192 decoded bytes. Resource overrides cannot exceed host caps. The server copies its base Options for each request, so overrides cannot leak into other requests.
 
-Raw requests, ASTRA2 metadata, and ASTRA3 hex-encoded semicolon options remain supported. Replies remain `RequestId\nok\nSource` or `RequestId\nerror\nMessage`. Bridge v8 requires this server for ASTRA4 requests; it does not silently retry against an old server with lost settings. PascalCase fields and CLI aliases normalize before duplicate, reserved-field, and resource-cap checks. Rebuild the server and reinstall the bridge together when migrating to Astra.
+Raw hex requests, ASTRA2 metadata, and ASTRA3 hex-encoded semicolon options remain supported. Replies remain text frames: `RequestId\nok\nSource` or `RequestId\nerror\nMessage`. Binary frames require ASTRA5 metadata. Bridge v9 requires the matching server; it does not silently retry against an old server with lost settings. PascalCase fields and CLI aliases normalize before duplicate, reserved-field, and resource-cap checks. Rebuild the server and reinstall the bridge together when migrating to Astra.
 
 ## Development workflow
 

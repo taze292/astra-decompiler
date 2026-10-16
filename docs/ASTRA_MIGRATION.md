@@ -1,6 +1,6 @@
 # Move to Astra
 
-The current release is **Astra 0.5**. Rebuild from this checkout and install the current `tools/Decompile.luau` (bridge v8) to use its readable options, array formatting, spacing controls, and updated comments. Older release executables and pinned loaders do not acquire new behavior automatically. For a first installation, use [getting started](GETTING_STARTED.md).
+The current release is **Astra 0.5.1**. Rebuild from this checkout and install the current `tools/Decompile.luau` (bridge v9) for raw bytecode and Volt-options compatibility, concurrent requests, binary transport, and caching. Older release executables and pinned loaders do not acquire new behavior automatically. For a first installation, use [getting started](GETTING_STARTED.md).
 
 ## Build and install
 
@@ -41,7 +41,7 @@ local Source = decompile(TargetScript, {
 })
 ```
 
-The installation script contains the full vertical defaults table, grouped by purpose. Change the live `AstraOptions` table to affect the next call. In `AstraConfig`, `Url`, `Timeout`, and `MaxPending` are captured at installation and require reinstallation to change; `ErrorMode` and `Options` are read again for each call. Settings from `AstraConfig.Options` override `AstraOptions`, and per-call options take final priority. See [the complete option reference](OPTIONS.md) for types, limits, aliases, and locator precedence.
+The installation script contains the full vertical defaults table, grouped by purpose. Change the live `AstraOptions` table to affect the next call. In `AstraConfig`, connection settings, `Concurrency`, `BinaryTransport`, and `CacheBytes` are captured at installation and require reinstallation to change; `ErrorMode` and `Options` are read again for each call. Settings from `AstraConfig.Options` override `AstraOptions`, and per-call options take final priority. See [the complete option reference](OPTIONS.md) for types, limits, aliases, and locator precedence.
 
 The CLI continues to use readable kebab-case flags, such as `--compact-arrays true` and `--blank-lines-between-groups 2`. Boolean options need an explicit `true`/`false` value, or the corresponding `--no-key` form; the documented `--state-machine` switch is an exception. C++ uses `Astra::Options` through `<Astra/Decompiler.hpp>`.
 

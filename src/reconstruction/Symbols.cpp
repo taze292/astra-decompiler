@@ -301,6 +301,7 @@ std::string Engine::Resolve(std::string Text)
             Taken.insert(Used[Parent].begin(), Used[Parent].end());
         }
         std::map<std::string, unsigned> Counters;
+        std::map<std::string, unsigned> Suffixes;
         for (auto Id : ByOwner[Owner])
             if (Symbols[Id].ImplicitSelf)
                 Taken.insert("self");
@@ -335,9 +336,18 @@ std::string Engine::Resolve(std::string Text)
                 Base = S.Preserve && Settings.PreserveFunctionNames && Identifier(S.Original) ? S.Original
                                                                                               : CaseName(S.Original, Settings.Casing);
                 S.Name = Base;
-                unsigned Suffix = 2;
-                while (Taken.count(S.Name))
-                    S.Name = Base + std::to_string(Suffix++);
+                if (Taken.count(S.Name))
+                {
+                    // Taken grows monotonically. Every suffix skipped for this
+                    // base stays unavailable, so resume instead of repeating the
+                    // same collision scan for each short-lived debug local.
+                    auto &Suffix = Suffixes[Base];
+                    Suffix = std::max(Suffix, 2u);
+                    do
+                    {
+                        S.Name = Base + std::to_string(Suffix++);
+                    } while (Taken.count(S.Name));
+                }
             }
             Taken.insert(S.Name);
         }
