@@ -1,0 +1,17 @@
+Satoshi and Switzer by Indian Type Foundry
+https://www.fontshare.com/fonts/satoshi
+https://www.fontshare.com/fonts/switzer
+
+Official packages used by site/build.py:
+https://api.fontshare.com/v2/fonts/download/satoshi
+https://api.fontshare.com/v2/fonts/download/switzer
+
+Font binaries are cached in ignored artifacts/site-fonts/ and copied into
+the generated website for self-hosting. They are not committed to Git.
+The included Fontshare-LICENSE.txt is the official package's FFL notice.
+
+JetBrains Mono by JetBrains (OFL-1.1):
+https://github.com/JetBrains/JetBrainsMono
+https://raw.githubusercontent.com/JetBrains/JetBrainsMono/master/fonts/webfonts/JetBrainsMono-Regular.woff2
+https://raw.githubusercontent.com/JetBrains/JetBrainsMono/master/fonts/webfonts/JetBrainsMono-Medium.woff2
+See JetBrainsMono-OFL.txt alongside the bundled webfonts.

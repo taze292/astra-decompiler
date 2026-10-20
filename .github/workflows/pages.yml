@@ -3,6 +3,7 @@ name: Astra documentation
 on:
   push:
     paths:
+      - CMakeLists.txt
       - README.md
       - THIRD_PARTY_NOTICES.md
       - docs/**
@@ -10,6 +11,7 @@ on:
       - .github/workflows/pages.yml
   pull_request:
     paths:
+      - CMakeLists.txt
       - README.md
       - THIRD_PARTY_NOTICES.md
       - docs/**

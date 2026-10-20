@@ -1,6 +1,6 @@
 # Customization
 
-The vertical `DefaultOptions` table in [Decompile.luau](../tools/Decompile.luau) lists every setting. Edit that table, set `getgenv().AstraOptions` before installation, or replace the global table between requests.
+Set defaults in `getgenv().AstraOptions`, then override individual settings per call. The `DefaultOptions` table in [Decompile.luau](../tools/Decompile.luau) lists every setting.
 
 ## Defaults and overrides
 
@@ -17,7 +17,7 @@ local Source = decompile(SomeScript, {
 })
 ```
 
-Astra starts with internal defaults, applies `AstraOptions`, then `AstraConfig.Options`, then per-call overrides. Missing fields retain their defaults. Input tables are not mutated. Unknown settings and invalid values produce an error; they are not treated as missing.
+Settings apply in this order: internal defaults → `AstraOptions` → `AstraConfig.Options` → per-call overrides. Omitted fields keep their defaults. Unknown names and invalid values return an error.
 
 ## Names
 
@@ -27,16 +27,18 @@ Astra starts with internal defaults, applies `AstraOptions`, then `AstraConfig.O
 | `Naming` | `Inferred`, `Debug`, `Generic` | `Inferred` |
 | `PreserveFunctionNames` | Keep recovered function spellings | `true` |
 | `UseTypeNames` | Prefer names such as Table1 over Value1 | `true` |
-| `LocalPrefix` | Anonymous local prefix | `Value` |
-| `ArgumentPrefix` | Anonymous parameter prefix | `Argument` |
+| `LocalPrefix` | Prefix for anonymous locals | `Value` |
+| `ArgumentPrefix` | Prefix for anonymous parameters | `Argument` |
 
-Inferred names use available debug names and useful service, member, or constructor hints. Globals, member keys, strings, and locator metadata keep their original identity. `MethodSyntax=true` recovers methods with implicit lowercase `self` where safe.
+Inferred names use available debug names and hints from services, members, and constructors. They cannot recover erased names. Globals, member keys, strings, and locator metadata keep their identity.
+
+Set `PreserveFunctionNames=false` to apply the selected casing to recovered function names. `MethodSyntax=true` uses colon methods with lowercase `self` where safe.
 
 ## Comments
 
 ```luau
 getgenv().AstraOptions = {
-    IncludeHeader = true,
+    IncludeHeader = false,
     IncludeLineComments = true,
     IncludeUpvalueComments = true,
     IncludeUpvalueIndexes = true,
@@ -44,7 +46,13 @@ getgenv().AstraOptions = {
 }
 ```
 
-The default upvalue style is a block comment:
+- `IncludeHeader` shows the bytecode version and measured decompilation time. Disable it for deterministic file comparisons.
+- `IncludeLineComments` shows function line and lookup comments.
+- `IncludeUpvalueComments` shows captured variables.
+- `CompactUpvalues` puts the capture list on one line.
+- `IncludeUpvalueIndexes` shows indexes in either capture style.
+
+The default capture list looks like this:
 
 ```luau
 --[[
@@ -53,17 +61,6 @@ The default upvalue style is a block comment:
     [2] Uv2 (ref)
 ]]--
 ```
-
-`CompactUpvalues=true` makes the list one line. Indexes are independent in both styles. Recovered compiler-inlined functions receive only `-- Uninlined by Astra` as their own metadata comment.
-
-The header is:
-
-```luau
--- Decompiled with Astra | Bytecode Version: 14
--- Time taken: 0.004497s
-```
-
-Disable `IncludeHeader` for deterministic full-file comparisons.
 
 ## Function locators
 
@@ -75,9 +72,9 @@ getgenv().AstraOptions = {
 }
 ```
 
-Require locators need a valid module path and a proven export. If that information is missing, Astra uses GC locators when enabled. Disabling require locators also permits GC locators for functions that could otherwise use `require`. Set `IncludeFunctionLocators=false` to hide both kinds while keeping line comments.
+Locators are comments that help find a matching live function. They do not execute during decompilation.
 
-Locators are comments to help find a live function; they do not execute during decompilation. Missing or ambiguous metadata does not produce an invented require path.
+Require locators need a valid module path and a proven export. Otherwise Astra uses GC locators when enabled. Set `IncludeFunctionLocators=false` to hide both kinds while keeping line comments.
 
 ## Arrays and spacing
 
@@ -92,7 +89,7 @@ getgenv().AstraOptions = {
 }
 ```
 
-`CompactArrays` shortens a proven array prefix:
+`CompactArrays` removes safe, consecutive array keys:
 
 ```luau
 -- CompactArrays = false
@@ -102,25 +99,20 @@ local Words = { [1] = "hi", [2] = "bye", [4] = "later" }
 local Words = { "hi", "bye", [4] = "later" }
 ```
 
-Gaps, nils, dynamic keys, duplicate keys, and call/vararg results keep explicit keys wherever shortening cannot be proven equivalent. Values are not reordered.
+Unsafe keys remain explicit; values are never reordered.
 
-`UseTabs` overrides space indentation. `BlankLinesBetweenGroups` accepts 0–3; `GroupSpacing=false` removes group separation. `SpaceInsideTableBraces` selects `{ Value }` or `{Value}` without changing strings or comments.
+`UseTabs` overrides space indentation. `BlankLinesBetweenGroups` accepts 0–3; `GroupSpacing=false` removes group separation. `SpaceInsideTableBraces` chooses between `{ Value }` and `{Value}`.
 
 ## Connection settings
 
-Set these before installing the bridge:
+Connection settings belong in `AstraConfig` before installing the bridge:
 
 ```luau
 getgenv().AstraConfig = {
     Url = "ws://127.0.0.1:8877/decompile",
     Timeout = 30,
-    MaxPending = 32,
     ErrorMode = "silent",
 }
 ```
 
-Reinstall to change connection settings. `ErrorMode="raise"` raises request errors instead of returning nil. See the [complete reference](OPTIONS.md) for every default, accepted value, resource limit, and advanced option.
-
-## Reconstruction failures
-
-`AllowFallback=false` is the default. Astra reconstructs structured control flow and reports an error if it cannot finish safely; it does not silently replace the function with a generated state machine. Developers can set `AllowFallback=true` to inspect diagnostic fallback output. `ForceStateMachine=true` requires that explicit opt-in too.
+Reinstall after changing connection settings. Set `ErrorMode="raise"` to raise request errors instead of returning nil. See the [full reference](OPTIONS.md#live-bridge-configuration) for queue, cache, and concurrency controls.

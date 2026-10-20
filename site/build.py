@@ -11,20 +11,74 @@ from __future__ import annotations
 import argparse
 import html
 from html.parser import HTMLParser
+import io
 import json
 import os
 from pathlib import Path
 import re
 import shutil
 from urllib.parse import quote, unquote, urlsplit, urlunsplit
+from urllib.request import urlopen
+import zipfile
 
 
 ROOT = Path(__file__).resolve().parent.parent
-# Only user guides are published. Internal reports stay in the repository.
+# Only user guides are published.
 PUBLIC_DOCUMENTS = ("INDEX", "GETTING_STARTED", "CUSTOMIZATION", "SETUPS", "OPTIONS", "BUILDING")
-DISCORD_URL = "https://discord.gg/FjUbXtdCzU"
+# Retire routes from earlier builds after their source reports have been removed.
+RETIRED_DOCUMENTS = (
+    "ARCHITECTURE", "ASTRA_MIGRATION", "ASTRA_PLAN", "ASTRA_VALIDATION",
+    "CONTROL_FLOW_AUDIT", "GITHUB_PAGES", "INLINE_RECOVERY",
+    "OBFUSCATED_CONTROL_FLOW", "PERFORMANCE", "READABILITY_REWRITE",
+    "RELIABILITY_UPDATE", "REWRITE_PLAN", "UNIVERSAL_CONTROL_FLOW", "VALIDATION",
+)
+DISCORD_URL = "https://discord.gg/cyjC3QejpG"
 LIST_ITEM = re.compile(r"^(\s*)([-+*]|\d+[.)])\s+(.+)$")
 FENCE = re.compile(r"^\s*(`{3,}|~{3,})([^`~]*)$")
+
+
+def icon(name: str) -> str:
+    return f'<svg class="icon" aria-hidden="true"><use href="assets/icons.svg#{name}"/></svg>'
+
+
+def new_tab_links(page: str) -> str:
+    """Open external web links in new tabs; keep site navigation in place."""
+    def update(match: re.Match[str]) -> str:
+        tag = match[0]
+        href = re.search(r'\bhref="([^"]*)"', tag)
+        if not href:
+            return tag
+        destination = urlsplit(html.unescape(href[1]))
+        if destination.scheme.lower() not in {"http", "https"} and not destination.netloc:
+            return tag
+        return tag[:-1] + ' target="_blank" rel="noopener noreferrer">'
+    return re.sub(r"<a\b[^>]*>", update, page)
+
+
+def copy_fonts(output: Path) -> None:
+    """Self-host fonts from the official distribution; keep binaries out of Git."""
+    cache = ROOT / "artifacts" / "site-fonts"
+    cache.mkdir(parents=True, exist_ok=True)
+    destination = output / "assets" / "fonts"
+    destination.mkdir(parents=True, exist_ok=True)
+    for family in ("Satoshi", "Switzer"):
+        cached = cache / f"{family}.woff2"
+        if not cached.is_file():
+            url = f"https://api.fontshare.com/v2/fonts/download/{family.lower()}"
+            with urlopen(url, timeout=60) as response:
+                package = response.read(16 * 1024 * 1024 + 1)
+            if len(package) > 16 * 1024 * 1024:
+                raise ValueError(f"{family} font package exceeds the size limit")
+            with zipfile.ZipFile(io.BytesIO(package)) as archive:
+                candidates = [entry for entry in archive.infolist()
+                              if Path(entry.filename).name == f"{family}-Variable.woff2"]
+                if len(candidates) != 1 or candidates[0].file_size > 1024 * 1024:
+                    raise ValueError(f"Unexpected {family} font package")
+                data = archive.read(candidates[0])
+            if not data.startswith(b"wOF2"):
+                raise ValueError(f"Invalid {family} WOFF2 font")
+            cached.write_bytes(data)
+        shutil.copyfile(cached, destination / cached.name)
 
 
 def table_cells(line: str) -> list[str]:
@@ -263,7 +317,7 @@ class LinkInventory(HTMLParser):
 
 def check_links(output: Path) -> int:
     inventories = {}
-    for page in output.glob("*.html"):
+    for page in [*output.glob("*.html"), *(output / "assets").rglob("*.svg")]:
         inventory = LinkInventory()
         inventory.feed(page.read_text(encoding="utf-8"))
         inventories[page.resolve()] = inventory
@@ -302,6 +356,7 @@ def build(output: Path, repository: str, ref: str) -> None:
     # Retire previously generated private pages, including in reused previews.
     # Touch only known generated routes directly inside the output directory.
     retired = {path.stem.lower().replace("_", "-") + ".html" for path in (ROOT / "docs").glob("*.md")}
+    retired.update(name.lower().replace("_", "-") + ".html" for name in RETIRED_DOCUMENTS)
     retired.update(("repository.html", "development.html", "third-party-notices.html"))
     for route in retired - set(pages.values()) - {"index.html"}:
         stale = output / route
@@ -309,34 +364,58 @@ def build(output: Path, repository: str, ref: str) -> None:
             stale.unlink()
     shutil.copyfile(ROOT / "site" / "styles.css", output / "styles.css")
     shutil.copyfile(ROOT / "site" / "app.js", output / "app.js")
+    shutil.copyfile(ROOT / "site" / "theme.js", output / "theme.js")
     shutil.copytree(ROOT / "site" / "assets", output / "assets", dirs_exist_ok=True)
+    copy_fonts(output)
     shutil.copyfile(ROOT / "docs" / "Luau-LICENSE.txt", output / "luau-license.txt")
     (output / ".nojekyll").write_text("", encoding="utf-8")
     titles = {source: document_title(source) for source in documents}
     repository_url = f"https://github.com/{repository}"
     release_url = repository_url + "/releases/latest"
+    version_match = re.search(r"project\(AstraDecompiler VERSION ([\d.]+)", (ROOT / "CMakeLists.txt").read_text(encoding="utf-8"))
+    if not version_match:
+        raise ValueError("Astra version is missing from CMakeLists.txt")
+    version = version_match[1]
     landing = (ROOT / "site" / "landing.html").read_text(encoding="utf-8")
-    for key, value in {"REPOSITORY_URL": repository_url, "RELEASE_URL": release_url, "DISCORD_URL": DISCORD_URL}.items():
+    for key, value in {
+        "REPOSITORY_URL": repository_url, "RELEASE_URL": release_url,
+        "DISCORD_URL": DISCORD_URL, "VERSION": version,
+        "EXAMPLE_SOURCE": (ROOT / "site/examples/source.luau").read_text(encoding="utf-8"),
+        "EXAMPLE_OUTPUT": (ROOT / "site/examples/decompiled.luau").read_text(encoding="utf-8"),
+    }.items():
         landing = landing.replace("@@" + key + "@@", html.escape(value, quote=True))
-    (output / "index.html").write_text(landing, encoding="utf-8", newline="\n")
-    guide_names = ("INDEX", "GETTING_STARTED", "CUSTOMIZATION", "SETUPS")
+    if re.search(r"@@[A-Z_]+@@", landing):
+        raise ValueError("Unresolved landing-page template variable")
+    (output / "index.html").write_text(new_tab_links(landing), encoding="utf-8", newline="\n")
+    guide_names = ("INDEX", "GETTING_STARTED")
+    workflow_names = ("CUSTOMIZATION", "SETUPS")
     reference_names = ("OPTIONS", "BUILDING")
     labels = {"INDEX": "Introduction", "GETTING_STARTED": "Installation", "CUSTOMIZATION": "Customization", "SETUPS": "CLI and integrations", "OPTIONS": "All options", "BUILDING": "Build from source"}
+    icons = {"INDEX": "book", "GETTING_STARTED": "download", "CUSTOMIZATION": "sliders", "SETUPS": "terminal", "OPTIONS": "code", "BUILDING": "code"}
     search_index = []
     for source in documents:
         renderer = Markdown(source, pages, repository, ref)
         body = renderer.render(source.read_text(encoding="utf-8-sig"))
+        if source.stem == "INDEX":
+            body = body.replace("<ul>", '<ul class="doc-cards">', 1)
+            body = re.sub(
+                r'<ul class="doc-cards">.*?</ul>',
+                lambda match: match[0].replace("</a>", f'{icon("arrow")}</a>'),
+                body, count=1, flags=re.S,
+            )
         def navigation(items: list[Path]) -> str:
-            return "\n".join(f'<li><a href="{pages[document.resolve()]}"' + (' aria-current="page"' if document == source else "") + f'>{html.escape(labels[document.stem])}</a></li>' for document in items)
+            return "\n".join(f'<li><a href="{pages[document.resolve()]}"' + (' aria-current="page"' if document == source else "") + f'>{icon(icons[document.stem])}{html.escape(labels[document.stem])}</a></li>' for document in items)
 
         guides = [document for name in guide_names for document in documents if document.stem == name]
+        workflows = [document for name in workflow_names for document in documents if document.stem == name]
         reference = [document for name in reference_names for document in documents if document.stem == name]
-        links = f'<section class="nav-group"><h2>Get started</h2><ul>{navigation(guides)}</ul></section><section class="nav-group"><h2>Reference</h2><ul>{navigation(reference)}</ul></section>'
-        toc = "\n".join(f'<li><a href="#{slug}">{html.escape(title)}</a></li>' for level, title, slug in renderer.headings if level == 2)
-        toc_html = f'<aside class="contents" aria-label="On this page"><p>On this page</p><ul>{toc}</ul></aside>' if toc else ""
-        search_text = re.sub(r"\s+", " ", plain_text(re.sub(r"```[\s\S]*?```", "", source.read_text(encoding="utf-8-sig"))))
-        search_index.append({"title": titles[source], "url": pages[source.resolve()], "text": search_text[:18000], "headings": [title for level, title, slug in renderer.headings if level == 2]})
-        group = "Get started" if source in guides else "Reference"
+        links = f'<section class="nav-group"><h2>Get started</h2><ul>{navigation(guides)}</ul></section><section class="nav-group"><h2>Work with Astra</h2><ul>{navigation(workflows)}</ul></section><section class="nav-group"><h2>Reference</h2><ul>{navigation(reference)}</ul></section>'
+        toc = "\n".join(f'<li class="toc-level-{level}"><a href="#{slug}">{html.escape(title)}</a></li>' for level, title, slug in renderer.headings if level in (2, 3))
+        source_url = html.escape(renderer.source_url(source), quote=True)
+        toc_html = f'<aside class="contents" aria-label="On this page"><p>On this page</p><ul>{toc}</ul><div class="contents-help"><a href="{source_url}">View source {icon("external")}</a><a href="{DISCORD_URL}">Get help on Discord {icon("external")}</a></div></aside>' if toc else ""
+        search_text = re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", body))).strip()
+        search_index.append({"title": titles[source], "url": pages[source.resolve()], "text": search_text, "headings": [title for level, title, slug in renderer.headings if level == 2]})
+        group = "Get started" if source in guides else ("Work with Astra" if source in workflows else "Reference")
         position = documents.index(source)
         adjacent = []
         for offset, direction in ((-1, "Previous"), (1, "Next")):
@@ -353,15 +432,20 @@ def build(output: Path, repository: str, ref: str) -> None:
     <title>{html.escape(titles[source])} · Astra</title>
     <link rel="stylesheet" href="styles.css">
     <link rel="icon" href="assets/astra.svg" type="image/svg+xml">
+    <script src="theme.js"></script>
     <script src="app.js" defer></script>
 </head>
-<body>
+<body class="documentation">
     <a class="skip-link" href="#content">Skip to content</a>
-    <header class="site-header"><a class="brand" href="index.html" aria-label="Astra home"><img src="assets/astra.svg" alt="" width="30" height="30">Astra<span class="brand-divider"></span><span class="brand-label">Documentation</span></a><div class="header-actions"><button type="button" class="search-trigger" hidden><span>Search documentation</span><kbd>Ctrl K</kbd></button><a class="github-link" href="{release_url}">Download<span aria-hidden="true"> ↗</span></a><button type="button" class="mobile-toggle" aria-controls="documentation-nav" aria-expanded="false" hidden>Menu</button></div></header>
+    <header class="site-header docs-header">
+        <a class="brand" href="index.html" aria-label="Astra home"><img src="assets/astra.svg" alt="" width="38" height="38">Astra</a>
+        <button type="button" class="search-trigger" aria-label="Search documentation" hidden>{icon("search")}<span>Search<span class="search-word"> documentation</span>…</span><kbd>Ctrl K</kbd></button>
+        <div class="header-actions"><a class="github-link" href="{repository_url}">GitHub {icon("external")}</a><button class="theme-toggle" type="button" aria-label="Switch to dark theme" aria-pressed="false" hidden><svg class="icon theme-sun" aria-hidden="true"><use href="assets/icons.svg#sun"/></svg><svg class="icon theme-moon" aria-hidden="true"><use href="assets/icons.svg#moon"/></svg></button><button type="button" class="mobile-toggle" aria-controls="documentation-nav" aria-expanded="false" hidden>Menu</button></div>
+    </header>
     <div class="layout">
-        <nav id="documentation-nav" class="sidebar" aria-label="Documentation">{links}<div class="sidebar-community"><a href="{release_url}">Download Astra <span aria-hidden="true">↗</span></a><a href="{DISCORD_URL}">Join Discord <span aria-hidden="true">↗</span></a></div></nav>
-        <main id="content" tabindex="-1"><div class="eyebrow">{group}</div><article>{body}</article>
-            {pagination}<footer><span>Astra documentation</span><a href="{DISCORD_URL}">Need a hand? Join Discord <span aria-hidden="true">↗</span></a></footer>
+        <nav id="documentation-nav" class="sidebar" aria-label="Documentation">{links}<div class="sidebar-community"><p>Bring your Luau into focus.</p><span>Get the Windows release and matching bridge.</span><a href="{release_url}">Download Astra {icon("download")}</a><a href="{DISCORD_URL}">Join the community {icon("external")}</a></div></nav>
+        <main id="content" class="docs-main" tabindex="-1"><div class="breadcrumb"><a href="docs.html">Docs</a><span aria-hidden="true">/</span><span>{group}</span></div><article>{body}</article>
+            {pagination}<footer class="docs-footer"><span>Astra · v{version}</span><a href="{source_url}">View this page on GitHub ↗</a><a href="{DISCORD_URL}">Need a hand? Join Discord ↗</a></footer>
         </main>
         {toc_html}
     </div>
@@ -369,7 +453,7 @@ def build(output: Path, repository: str, ref: str) -> None:
 </body>
 </html>
 '''
-        (output / pages[source.resolve()]).write_text(page, encoding="utf-8", newline="\n")
+        (output / pages[source.resolve()]).write_text(new_tab_links(page), encoding="utf-8", newline="\n")
     (output / "search-index.json").write_text(json.dumps(search_index, ensure_ascii=True, separators=(",", ":")), encoding="utf-8", newline="\n")
     checked = check_links(output)
     print(f"Built Astra landing page and {len(documents)} public guides; checked {checked} local links and anchors.")

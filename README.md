@@ -1,8 +1,8 @@
-![Astra](site/assets/astra.svg)
+![Astra star logo](site/assets/astra.svg)
 
 # Astra
 
-**[Download](https://github.com/taze292/astra-decompiler/releases/latest)** · [Documentation](https://taze292.github.io/astra-decompiler/docs.html) · [Join Discord](https://discord.gg/FjUbXtdCzU)
+**[Download](https://github.com/taze292/astra-decompiler/releases/latest)** · [Documentation](https://taze292.github.io/astra-decompiler/docs.html) · [Join Discord](https://discord.gg/cyjC3QejpG)
 
 A fast C++20 decompiler for Luau bytecode. Use Astra through a local Roblox bridge, the command line, or a C++ library. Output supports inferred names, native captures, method syntax, compact arrays, and configurable comments and spacing.
 
@@ -54,4 +54,4 @@ Input is raw, decompressed serialized Luau bytecode. Original comments, formatti
 
 ## Contribute
 
-See [build from source](docs/BUILDING.md) and the [developer guide](dev/README.md). Run `./build.ps1 -Test` before submitting changes. [Third-party notices](THIRD_PARTY_NOTICES.md) cover Luau.
+See [build from source](docs/BUILDING.md) and the [developer guide](dev/README.md). Run `./build.ps1 -Test` before submitting changes. Licenses are listed in [third-party notices](THIRD_PARTY_NOTICES.md).

@@ -1,77 +1,110 @@
-# Configuration reference
+# Options reference
 
-The C++ API, CLI, and bridge use the same option parser and validation rules. Defaults preserve the original PascalCase output. Configuration changes local bindings and generated comments; it never renames globals, methods, table keys, string literals, or debug names used to identify live functions.
+The bridge, CLI, and C++ library share the same output settings. This page lists every option; start with [customization](CUSTOMIZATION.md) for common examples.
 
 ## Shared options
 
-The Luau bridge uses the readable PascalCase names in the second column, for example `{ Casing = "Snake", IncludeGcLocators = false }`. C++ callers can set those fields directly or call `Astra::ApplyOption(Options, "Casing", "Snake")`. The backend also accepts the CLI names in the first column; aliases resolve before duplicate, reserved-field, and resource-cap validation. The bridge deliberately exposes only the PascalCase schema.
+Use PascalCase fields in Luau and C++, such as `{ Casing = "Snake" }`. CLI flags use kebab-case, such as `--casing snake`.
 
-CLI syntax is `--key value`. Boolean switches also support `--no-key`; `--state-machine` alone means true. Enum values are case-insensitive, and `PascalCase`, `camelCase`, and `snake_case` are accepted casing aliases. Names and prefixes remain case-sensitive.
+Boolean flags accept `true` or `false`; `--no-key` disables an option. Enum values are case-insensitive. Names and prefixes are case-sensitive.
+
+### Naming
 
 | CLI key | Luau / C++ field | Default | Values / meaning |
 | --- | --- | --- | --- |
-| `encoding` | `Encoding` | `Auto` | `auto`, `plain`, `roblox`; validate the whole instruction stream |
 | `casing` | `Casing` | `Pascal` | `pascal`, `camel`, `snake`, `preserve` |
 | `naming` | `Naming` | `Inferred` | `inferred`, `debug`, `generic` |
 | `type-names` | `UseTypeNames` | true | Use TableN, NumberN, etc. for anonymous values with an unambiguous type |
 | `preserve-function-names` | `PreserveFunctionNames` | true | Keep recovered original function bindings' spelling; false applies the selected casing |
-| `method-syntax` | `MethodSyntax` | true | Recover `function Table:Method(...)` with implicit lowercase `self` |
-| `native-captures` | `NativeCaptures` | true | Use native reference locals when lifetime analysis proves safe; false retains boxes |
 | `infer-members` | `InferMemberNames` | true | Infer local names from accessed members |
 | `infer-calls` | `InferCallNames` | true | Infer service, module, constructor, Connection, and RaycastResult names |
 | `local-prefix` | `LocalPrefix` | `Value` | Prefix for anonymous locals without a selected type name; ASCII identifier, 1–32 characters |
 | `argument-prefix` | `ArgumentPrefix` | `Argument` | Prefix for anonymous parameters; same identifier rules |
+
+### Layout
+
+| CLI key | Luau / C++ field | Default | Values / meaning |
+| --- | --- | --- | --- |
 | `indent` | `IndentWidth` | 4 | Spaces per level, 1–16; ignored for indentation when UseTabs is enabled |
 | `use-tabs` | `UseTabs` | false | Indent with one tab per level |
 | `blank-lines-between-groups` | `BlankLinesBetweenGroups` | 1 | Blank lines between statement groups, 0–3; GroupSpacing=false suppresses them |
 | `space-inside-table-braces` | `SpaceInsideTableBraces` | true | Inline table padding: `{ Value }` versus `{Value}`; strings/comments are untouched |
 | `compact-arrays` | `CompactArrays` | true | Omit proven contiguous numeric prefix keys; retain gaps, nils, overlaps, and unsafe keys |
+| `group-spacing` | `GroupSpacing` | true | Separate statement groups with blank lines |
+
+### Comments and locators
+
+| CLI key | Luau / C++ field | Default | Values / meaning |
+| --- | --- | --- | --- |
 | `header` | `IncludeHeader` | true | Two-line generator/version and measured elapsed-time header |
 | `lines` | `IncludeLineComments` | true | Function line comments, including their lookup expressions |
 | `upvalues` | `IncludeUpvalueComments` | true | Capture comments with lowercase copy/ref kinds |
 | `compact-upvalues` | `CompactUpvalues` | false | One-line capture list; default is a block comment with an Upvalues heading and indexed copy/ref rows |
 | `upvalue-indexes` | `IncludeUpvalueIndexes` | true | Show 1-based capture indexes in either comment style |
-| `group-spacing` | `GroupSpacing` | true | Separate statement groups with blank lines |
 | `locators` | `IncludeFunctionLocators` | true | Master switch for both kinds of function lookup |
 | `gc-locators` | `IncludeGcLocators` | true | Allow `filtergc(...)` lookups |
 | `require-locators` | `IncludeRequireLocators` | true | Allow proven `require(ModulePath)` export paths |
 | `filter-line` | `FilterLineField` | `Line` | `Line` or `StartLine`; file/API only, bridge supplies detected metadata |
 | `module-path` | `ModulePath` | empty | Single-line ASCII Instance expression, ≤8,192 bytes; file/API only |
+
+### Reconstruction
+
+| CLI key | Luau / C++ field | Default | Values / meaning |
+| --- | --- | --- | --- |
+| `encoding` | `Encoding` | `Auto` | `auto`, `plain`, `roblox`; validate the whole instruction stream |
+| `method-syntax` | `MethodSyntax` | true | Recover `function Table:Method(...)` with implicit lowercase `self` |
+| `native-captures` | `NativeCaptures` | true | Use native reference locals when lifetime analysis proves safe; false retains boxes |
 | `optimization-passes` | `OptimizationPasses` | 5 | Maximum 0–8 simplification passes; stop earlier on convergence; 0 retains noisier lowering |
 | `state-machine` | `ForceStateMachine` | false | Force explicit program-counter control flow for diagnostics; requires AllowFallback=true |
 | `fallback` | `AllowFallback` | false | Opt in to state-machine output when structuring cannot safely finish |
+
+### Processing limits
+
+| CLI key | Luau / C++ field | Default | Values / meaning |
+| --- | --- | --- | --- |
 | `max-input-bytes` | `MaxInputBytes` | 67,108,864 | 1–268,435,456 bytes |
 | `max-output-bytes` | `MaxOutputBytes` | 67,108,864 | 1–268,435,456 bytes |
 | `max-analysis-cells` | `MaxAnalysisCells` | 16,000,000 | 1–64,000,000 instruction × register cells per function |
 | `max-analysis-work` | `MaxAnalysisWork` | 32,000,000 | 1–256,000,000 graph/dataflow/region work units per request |
 | `max-nesting` | `MaxNesting` | 128 | Maximum closure depth, 1–128; root is depth 0 |
 
-Unknown keys, invalid enums, partial numbers such as `2junk`, numeric overflow, and invalid Boolean text are errors. Boolean text must be `true` or `false`. Forced state machines with fallback disabled are rejected. `ValidateOptions` also validates settings constructed directly in C++.
+Unknown keys, invalid values, and exceeded limits return errors. Missing fields keep their defaults. `ValidateOptions` checks settings created directly in C++ too.
 
-Astra 0.5 defaults to structured reconstruction with `AllowFallback=false` in both the bridge and C++ API. If structuring cannot finish safely, the request fails rather than inserting a dispatcher. State-machine output is an explicit diagnostic opt-in: enable `AllowFallback` first, then optionally `ForceStateMachine` to force that output. On the CLI, use `--fallback true --state-machine` for the forced form.
+`AllowFallback=false` is the default. A reconstruction failure returns an error. For diagnostic state-machine output, explicitly enable fallback first; forced output also needs `ForceStateMachine=true`.
 
-The legacy `--no-filtergc` switch still disables **both** locator kinds for compatibility. Prefer `--no-gc-locators` to disable only GC comments, or `--no-locators` to disable both.
-
-## Array and spacing rules
-
-With `CompactArrays=true`, a safe explicit prefix such as `{ [1] = "hi", [2] = "bye", [4] = "later" }` becomes `{ "hi", "bye", [4] = "later" }`. The transformation preserves source field order and stops at gaps or nils. Ambiguous computed keys, overlapping duplicates, and call/vararg expansion need additional checks; the decompiler keeps explicit keys wherever equivalence cannot be proved. Set CompactArrays=false for fully explicit reconstructed indices.
-
-UseTabs selects tabs; otherwise IndentWidth supplies 1–16 spaces per level. GroupSpacing and BlankLinesBetweenGroups control statement-group separation. SpaceInsideTableBraces affects inline constructor padding. These controls never rewrite the contents of strings or comments and do not rename table keys.
+The legacy `--no-filtergc` flag disables both locator types. Prefer `--no-gc-locators` or `--no-locators`.
 
 ## Naming rules
 
-- **Inferred:** prefer debug names, then useful service/module/member hints, then typed or generic numbered names.
-- **Debug:** use available debug local/function names and numbered fallbacks; do not expose inferred service/member names as binding names.
-- **Generic:** number all local bindings and parameters. This overrides original function-name preservation. `UseTypeNames=false` makes anonymous local prefixes uniformly Value/value; parameters use Argument/argument.
-- **Preserve casing:** retain valid debug/inferred spelling, including underscores. Invalid or erased identifiers still need sanitized/generated names.
+- **Inferred:** use debug names, useful bytecode hints, then generated names.
+- **Debug:** use debug names and numbered fallbacks.
+- **Generic:** number all locals and parameters, including functions.
+- **Preserve casing:** retain valid recovered spelling.
 
-Names are allocated after simplification, in deterministic first-reference order. Global names and enclosing bindings are reserved; collisions receive numeric suffixes. Snake casing recognizes acronym boundaries (`HTTPServer` → `http_server`), camel casing gives `httpServer`, and reserved words receive a suffix. Original function names remain unchanged unless `PreserveFunctionNames=false` or generic naming is selected.
+`UseTypeNames=false` uses the configured local prefix instead of names such as Number1. `PreserveFunctionNames=false` lets the chosen casing change recovered function names.
 
-Implicit method receivers always use Luau's required spelling `self`, including in generic naming mode. Set `MethodSyntax=false` to apply ordinary naming to explicit receivers. Method conversion is suppressed where it could shadow a captured outer receiver or a global `self`. Inference does not recover erased source names; it supplies hints from bytecode operations. For example, `Instance.new("Part")` suggests `Part`, event `Connect` suggests `Connection`, and raycasts suggest `RaycastResult`.
+Snake casing turns `HTTPServer` into `http_server`; camel casing gives `httpServer`. Collisions and reserved words receive suffixes. Globals and member keys are unchanged.
+
+Colon methods keep Luau's required lowercase `self`. Set `MethodSyntax=false` to name an explicit receiver normally. Unsafe method conversions are skipped.
+
+## Array and spacing rules
+
+`CompactArrays=true` turns a safe prefix such as `{ [1] = "hi", [2] = "bye", [4] = "later" }` into `{ "hi", "bye", [4] = "later" }`. Gaps, nils, overlapping keys, and unsafe computed values keep explicit keys. Values are not reordered.
+
+`UseTabs` selects tabs; otherwise `IndentWidth` controls spaces. `GroupSpacing` and `BlankLinesBetweenGroups` control blank lines. `SpaceInsideTableBraces` controls inline table padding. Strings and comments are unchanged.
 
 ## Comment rules
 
-Upvalues use a block comment by default:
+The default header contains the bytecode version and core decompilation time:
+
+```luau
+-- Decompiled with Astra | Bytecode Version: 14
+-- Time taken: 0.001021s
+```
+
+Timing excludes transport and Roblox scheduling. `IncludeHeader=false` removes the header for deterministic file comparisons.
+
+Captures use a block comment by default:
 
 ```luau
 --[[
@@ -81,93 +114,99 @@ Upvalues use a block comment by default:
 ]]--
 ```
 
-`CompactUpvalues=true` uses a one-line list. `IncludeUpvalueIndexes` controls bracketed numbering independently in both styles; `IncludeUpvalueComments=false` hides the entire list. For example, `{ CompactUpvalues = true, IncludeUpvalueIndexes = false }` produces a compact unnumbered list. Existing `AstraOptions` tables are preserved on reinstallation.
+`CompactUpvalues` makes this one line. `IncludeUpvalueIndexes` controls indexes in either style. `IncludeUpvalueComments=false` hides the list.
 
-`IncludeLineComments=false` suppresses the entire function line/lookup comment. `IncludeFunctionLocators=false` retains line numbers while hiding lookups. When `IncludeRequireLocators=true`, a valid ModulePath is available, and a reachable, unambiguous export is proven, that lookup takes priority. Missing game paths or disabled require locators use GC instead if `IncludeGcLocators=true`. With GC disabled, unresolved functions have only their line number. No dangling separator is emitted.
+`IncludeLineComments=false` hides the entire function line/lookup comment. `IncludeFunctionLocators=false` hides lookups while keeping line numbers.
 
-A recovered compiler-inlined function receives only `-- Uninlined by Astra` as its own metadata comment. Its line, lookup, and upvalue annotations are suppressed. Ordinary functions inside that body retain their own settings.
+Require locators need a valid module path and a proven export. Otherwise GC locators are used when enabled. GC lookups use serialized names and up to five representable constants when name/line metadata is incomplete. They depend on executor support and a matching live closure.
 
-Export analysis is skipped when its output is disabled. It never requires or executes a module. Static export paths can follow nested tables, numeric/quoted keys, directly returned functions, and recognizable constructors/metatables; conflicting writes/returns or unknown mutations prevent a claimed path.
+Recovered inlined functions receive `-- Uninlined by Astra` instead of their own line, locator, and capture comments. Nested ordinary functions keep their settings.
 
-GC lookups use serialized function names, never generated binding names. If both name and line are present, those filters are sufficient for the emitted expression. Otherwise at most five representable constant-pool entries are included. Missing lines display `Unknown`; nil/NaN, table templates, and closure templates are excluded from constants. Lookups depend on executor support and a matching live closure; they are not uniqueness proofs.
+Locators are comments. Export analysis never requires or executes the target module.
 
 ## Live bridge configuration
 
-Start the local server, then execute the release's included `Decompile.luau`. Installation and requests do not print or warn. Keep the bridge and executable from the same release.
+Set connection settings before executing the release's matching `Decompile.luau`:
 
 ```luau
 getgenv().AstraConfig = {
     Url = "ws://127.0.0.1:8877/decompile",
     Timeout = 30,
     MaxPending = 32,
-    MaxQueued = 16384,
     Concurrency = 8,
-    BinaryTransport = true,
-    CacheBytes = 32 * 1024 * 1024,
-    ErrorMode = "silent", -- or "raise"
+    ErrorMode = "silent",
 }
-getgenv().AstraOptions = {
-    Casing = "Pascal",
-    Naming = "Inferred",
-    IncludeRequireLocators = false,
-    IncludeGcLocators = true,
-    MethodSyntax = true,
-    NativeCaptures = true,
-    CompactUpvalues = false,
-    IncludeUpvalueIndexes = true,
-    CompactArrays = true,
-    UseTabs = false,
-    IndentWidth = 4,
-    GroupSpacing = true,
-    BlankLinesBetweenGroups = 1,
-    SpaceInsideTableBraces = true,
-}
--- Execute the included Decompile.luau after setting installation options.
 ```
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `Url` | `ws://127.0.0.1:8877/decompile` | Local server address |
+| `Timeout` | 30 | Seconds to wait per call |
+| `MaxPending` | 32 | Active-call limit, 1–128 |
+| `MaxQueued` | 16,384 | Waiting-call limit, 0–65,536; 0 rejects calls when full |
+| `Concurrency` | min(8, MaxPending) | Worker count for bulk helpers, 1–MaxPending |
+| `BinaryTransport` | true | Binary ASTRA5 requests; false uses text ASTRA4 |
+| `CacheBytes` | 33,554,432 | Bytecode/source cache budget, 0–256 MiB; 0 disables it |
+| `ErrorMode` | `silent` | Return nil on error; `raise` raises it |
+| `Options` | empty table | Output overrides applied after AstraOptions |
+
+Reinstall to change connection, queue, transport, concurrency, timeout, or cache settings. `Options` and `ErrorMode` are read for each call.
+
+### Requests and overrides
 
 ```luau
-local Camera = game:GetService("StarterPlayer"):FindFirstChild("CameraModule", true)
-local Source = decompile(Camera)
-local Snake = decompile(Camera, { Casing = "Snake", IncludeLineComments = false })
-local Generic = decompile(Camera, 60, { Naming = "Generic", UseTypeNames = false })
-local Details = getgenv().AstraBridge.LastRequest
+local Source = decompile(SomeScript)
+local Snake = decompile(SomeScript, { Casing = "Snake" })
+local LongerWait = decompile(SomeScript, 60, {
+    IncludeHeader = false,
+})
 ```
 
-Each call snapshots `getgenv().AstraOptions`, then overlays `AstraConfig.Options` and per-call options. Input tables are never mutated. Edit or replace `AstraOptions` between requests without reinstalling. Missing fields use the documented defaults. Resource limits can be reduced per request, but cannot exceed server limits. `ModulePath` and `FilterLineField` are supplied automatically by the bridge.
+Each call applies internal defaults, `AstraOptions`, `AstraConfig.Options`, then its overrides. Input tables are not modified. The bridge supplies `ModulePath` and `FilterLineField` automatically.
 
-`Url`, `Timeout`, `MaxPending`, `MaxQueued`, `Concurrency`, `BinaryTransport`, and `CacheBytes` are captured at installation; reinstall to change them. `Options` and `ErrorMode` are read from the current configuration table on each call. `MaxPending` is 1–128 and limits active calls. Additional calls wait for a slot within their timeout before extracting bytecode. `MaxQueued` bounds these waiting callers (0–65,536; default 16,384); 0 rejects calls when all active slots are occupied. `Concurrency` is 1–MaxPending and defaults to the smaller of 8 and MaxPending. It controls `DecompileMany` and `PrepareSave` workers. `BinaryTransport=true` uses binary ASTRA5 requests; false selects text ASTRA4. `CacheBytes` is 0–256 MiB, defaults to 32 MiB, and bounds retained bytecode plus source across at most 8,192 entries; 0 disables caching. A timeout stops waiting and releases the pending slot; it does not cancel C++ work already running.
+A timeout stops waiting, but does not cancel C++ work already running. Per-request resource limits can be reduced, but cannot exceed server caps.
 
-Module paths come from the live instance hierarchy. Unique descendants can use `FindFirstChild("Name", true)`; ambiguous names retain explicit paths or omit require locators. No module is required or executed during decompilation.
+Volt's native `DecompilerOptions` are accepted for integrations. Supported fields are translated; `LastRequest.IgnoredNativeOptions` lists settings without an equivalent. Astra option tables use strict validation.
 
-The default header is exactly two comments followed by a blank line:
+### Errors and status
 
 ```luau
--- Decompiled with Astra | Bytecode Version: 14
--- Time taken: 0.004497s
+local Bridge = getgenv().AstraBridge
+local Error = Bridge.LastError
+local Details = Bridge.LastRequest
 ```
 
-Time is measured inside the C++ decompiler from decoding through finalization, in seconds; it excludes WebSocket transfer, Roblox scheduling, and header formatting. `LastRequest.ElapsedSeconds` includes bridge work. Use `IncludeHeader=false` for byte-identical output comparisons and hashes; the generated body remains deterministic.
+The bridge is silent by default. Failed requests return nil; the direct `Bridge.Decompile` entry point also returns the error as a second value. Successful requests clear `LastError`.
 
-Failures return nil by default. Inspect `AstraBridge.LastError` and `LastRequest.Succeeded/Error/ElapsedSeconds`; successful calls clear LastError and also report input/output sizes, resolved options, module-path status, GC/require counts, and line field. These fields describe the last completed call, so concurrent callers should use their own returned source. `ErrorMode="raise"` makes failures raise instead. Installation failures still return nil without replacing the original decompiler.
+`LastRequest` includes success/error, elapsed time, sizes, resolved options, locator metadata, cache-hit status, and protocol. `Stats` tracks requests, successes, failures, cache hits, and transferred bytes.
 
-`AstraBridge.Decompile` is a direct entry point and accepts either a script or raw bytecode. Failures also return their error as a second value in silent mode. Volt's native `DecompilerOptions` values are accepted for executor integrations. Astra translates `SmartVariableRenamer`, formatter indentation, and supported metadata switches; `LastRequest.IgnoredNativeOptions` lists native settings without an equivalent. Astra tables still use strict validation.
+Status describes the last completed call. Concurrent callers should use their own returned source.
 
-`AstraBridge.DecompileMany(Targets, Timeout, Overrides)` returns an ordered array of `{ Source = ..., Error = ... }` records. `AstraBridge.PrepareSave(Roots, Timeout, Overrides)` accepts an Instance or root array, inventories scripts, and returns the same records plus the target array. Server-context Scripts are skipped. `AstraBridge.ClearCache()` releases cached results. `AstraBridge.Stop()` disconnects, clears the cache, wakes pending calls, and restores the previous decompiler.
+### Bulk helpers and cleanup
 
-`LastRequest.CacheHit` and `Protocol` report reuse and transport. `AstraBridge.Stats` records request, success, failure, cache-hit, and transferred-byte counts. Responses for different requests can arrive out of order. These status fields describe the last completed call; concurrent callers should use their own return values.
+| Method | Result |
+| --- | --- |
+| `Bridge.DecompileMany(Targets, Timeout, Overrides)` | Ordered `{ Source, Error }` records |
+| `Bridge.PrepareSave(Roots, Timeout, Overrides)` | Result records plus the inventoried targets |
+| `Bridge.ClearCache()` | Releases cached bytecode and source |
+| `Bridge.Stop()` | Disconnects, wakes waiting calls, clears the cache, and restores the previous decompiler |
+
+`PrepareSave` accepts an Instance or an array of roots. It skips server-context Scripts. Requests may finish out of order; bulk results retain input order.
 
 ## CLI and batch controls
 
-`--serve --port N` starts the Windows loopback server. `--disassemble` prints decoded instructions. `--stats` adds decode/reconstruction/finalization timings, instruction/symbol counts, analysis work, and fallback count to stderr for single-file decompilation. It never changes source output.
-
 ```powershell
 .\astra.exe input.luac --casing snake --no-preserve-function-names -o output.luau
-.\astra.exe input.luac --no-gc-locators --module-path 'game.Modules.Example' --stats
+.\astra.exe input.luac --no-header --stats -o output.luau
 .\astra.exe --batch --jobs 4 --output-dir output a.luac b.luac
 ```
 
-Batch worker count is 1 by default, 0 selects up to eight hardware threads, and explicit counts are 1–32. Results and error reporting follow input order. Invalid inputs do not prevent valid files from being written; the process exits nonzero if any fail. Filename collisions and input/output aliases are rejected before creating the output directory. Existing files require `--overwrite`. The CLI retains at most one worker-sized window of inputs/results. Batch mode cannot combine with server mode, disassembly, `--stats`, or `-o`.
+`--serve --port N` starts the Windows server. `--disassemble` prints instructions. `--stats` writes timings, counts, analysis work, and fallback counts to stderr without changing generated source.
 
-The C++ `DecompileBatch(span<string_view>, Settings, Workers)` is synchronous and returns ordered `BatchResult` entries, each with `Output`, `Failure`, and `Succeeded()`. Input storage must remain alive until it returns. Shared invalid settings throw before processing; individual decompilation failures are contained in their entries. The API retains all returned results, unlike the CLI's windowed processing.
+Batch mode uses one worker by default. `--jobs 0` selects up to eight hardware threads; explicit counts are 1–32. Input/output aliases and filename collisions are rejected. Existing outputs need `--overwrite`.
 
-Limits constrain particular resources, not total process RSS or a wall-clock deadline. Worker count multiplies active request memory. Graph/dataflow work accounting is deterministic but is not a CPU instruction count or a timeout for every transformation.
+A failed file does not discard successful outputs. The CLI exits nonzero if any input fails. Batch mode cannot combine with server mode, disassembly, `--stats`, or `-o`.
+
+The C++ `DecompileBatch` API returns ordered `BatchResult` entries with `Output`, `Failure`, and `Succeeded()`. Input storage must stay alive until the call returns. Invalid shared settings throw before processing; individual failures stay in their result entries.
+
+Limits cover specific resources, not total process memory or a wall-clock deadline. More workers increase active-request memory.

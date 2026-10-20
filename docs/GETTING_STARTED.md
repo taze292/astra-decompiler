@@ -1,68 +1,72 @@
 # Installation
 
+Use the prebuilt Windows x64 release. No compiler or build tools are needed.
+
 ## Download the release
 
-1. Open the [latest GitHub release](https://github.com/taze292/astra-decompiler/releases/latest).
-2. Download the **Windows x64 ZIP** from **Assets**. Choose the packaged release, not GitHub's source-code ZIP.
-3. Extract the entire ZIP into a folder.
+1. Open the [latest release](https://github.com/taze292/astra-decompiler/releases/latest).
+2. Under **Assets**, download the **Windows x64 ZIP**.
+3. Extract the whole ZIP into a folder.
 
-The package includes `astra.exe`, `Start-Decompiler.cmd`, and the matching `Decompile.luau` bridge. You do not need Visual Studio, CMake, Clang, or the Luau source to use it. To compile Astra yourself, see [build from source](BUILDING.md).
+The ZIP contains `astra.exe`, `Start-Decompiler.cmd`, and the matching `Decompile.luau`. GitHub's source-code ZIP does not contain the built executable.
 
 ## Start the local server
 
-Run **`Start-Decompiler.cmd`** from the extracted folder and leave its window open. You can also start it from PowerShell in that folder:
+Run `Start-Decompiler.cmd` and leave its window open. To start it manually from the extracted folder:
 
 ```powershell
 .\astra.exe --serve
 ```
 
-Leave it running. The default address is `ws://127.0.0.1:8877/decompile`; it accepts local connections only.
+The default address is `ws://127.0.0.1:8877/decompile`. The server accepts local connections only.
 
 ## Install the bridge
 
-Open the included **`Decompile.luau`**, copy its contents, and execute it in your Roblox executor. Keep the bridge and executable from the same release.
+Your executor needs `getscriptbytecode` and `WebSocket.connect` or `websocket.connect`.
 
-Your executor needs `getscriptbytecode` and `WebSocket.connect` or `websocket.connect`. The included bridge works without downloading another script.
-
-The script connects before installing `getgenv().decompile`. It does not print or warn.
+Open the included `Decompile.luau`, copy it, and execute it in your executor. Keep the bridge and executable from the same release.
 
 ```luau
 local Source = decompile(SomeScript)
 ```
 
-The target can be a script Instance with accessible bytecode, including a ModuleScript, LocalScript, or client-run Script, or a raw bytecode string such as `getscriptbytecode(SomeScript)`. Decompiling a module does not require or execute it. Volt's native `DecompilerOptions` values are accepted; supported settings are translated and unsupported settings are listed in `AstraBridge.LastRequest.IgnoredNativeOptions`.
+Pass a script Instance with accessible bytecode, or a raw bytecode string. The bridge connects before replacing `getgenv().decompile`; it does not require or execute the target module.
 
 ## Change the output
 
-Set global defaults or pass options for one request:
+Change your defaults or override one call:
 
 ```luau
 getgenv().AstraOptions.Casing = "Camel"
 
 local Source = decompile(SomeScript, {
-    IncludeRequireLocators = false,
-    IncludeGcLocators = true,
+    IncludeHeader = false,
 })
 ```
 
-Missing fields use internal defaults. Start with [customization](CUSTOMIZATION.md), or browse the [full reference](OPTIONS.md).
+See [customization](CUSTOMIZATION.md) for common settings and [all options](OPTIONS.md) for the complete reference.
 
 ## Troubleshooting
 
-**`decompile` returns nil:** inspect the error without enabling bridge output:
+### The result is nil
+
+The bridge is silent by default. Read its error and last request:
 
 ```luau
-local Error = getgenv().AstraBridge.LastError
-local Request = getgenv().AstraBridge.LastRequest
+local Bridge = getgenv().AstraBridge
+local Error = Bridge.LastError
+local Request = Bridge.LastRequest
 ```
 
-Check that the server is running and your executor exposes the required APIs. A script may have no accessible bytecode. Unknown option names and invalid values are rejected rather than silently ignored.
+Check that the server is running, the required executor APIs exist, and the target has accessible bytecode. Invalid option names and values also cause errors.
 
-**The server closes immediately:** start it with `.\astra.exe --serve` from PowerShell to read the error. If the port is already in use, close the other Astra server or [choose another port](SETUPS.md#another-local-port).
+### The server closes immediately
 
-State-machine fallback is disabled by default. If Astra cannot reconstruct a function safely, `LastError` reports the failure instead of returning a dispatcher. Keep the error and a reproducible bytecode fixture when reporting a reconstruction bug.
+Run `.\astra.exe --serve` from PowerShell to see the error. If the port is busy, close the other Astra server or [choose another port](SETUPS.md#another-local-port).
 
-**A large request times out:** pass a longer timeout in seconds:
+### A request times out
+
+Pass a longer timeout in seconds:
 
 ```luau
 local Source = decompile(SomeScript, 60, {
@@ -70,10 +74,18 @@ local Source = decompile(SomeScript, 60, {
 })
 ```
 
-Timeout stops waiting; it does not cancel work already running on the server. [Processing limits](OPTIONS.md#shared-options) can be reduced per request.
+A timeout stops waiting; it does not cancel work already running on the server.
 
-**Connection settings changed:** reinstall the bridge after editing connection, queue, concurrency, transport, or cache settings in `AstraConfig`. Output options can change without reinstallation. See the [configuration reference](OPTIONS.md#live-bridge-configuration).
+### Connection settings do not take effect
 
-**Restore the previous decompiler:** call `getgenv().AstraBridge.Stop()`.
+Reinstall the bridge after changing the URL, timeout, queue, transport, concurrency, or cache settings. Output options can change between calls. See [bridge configuration](OPTIONS.md#live-bridge-configuration).
 
-For more help, [join Discord](https://discord.gg/FjUbXtdCzU).
+### Reconstruction fails
+
+Astra reports an error when it cannot reconstruct a function. State-machine fallback is disabled by default. Keep the error and a reproducible bytecode fixture when reporting a bug.
+
+### Restore the previous decompiler
+
+Call `getgenv().AstraBridge.Stop()`.
+
+For more help, [join Discord](https://discord.gg/cyjC3QejpG).

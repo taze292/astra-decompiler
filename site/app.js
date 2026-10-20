@@ -3,6 +3,23 @@
 // The documentation stays readable without JavaScript. These are enhancements.
 document.documentElement.classList.add("js-enabled");
 
+const ThemeToggle = document.querySelector(".theme-toggle");
+function UpdateThemeLabel() {
+    const IsDark = document.documentElement.dataset.theme === "dark";
+    ThemeToggle?.setAttribute("aria-label", `Switch to ${IsDark ? "light" : "dark"} theme`);
+    ThemeToggle?.setAttribute("aria-pressed", String(IsDark));
+}
+if (ThemeToggle) {
+    ThemeToggle.hidden = false;
+    UpdateThemeLabel();
+    ThemeToggle.addEventListener("click", () => {
+        const Theme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+        document.documentElement.dataset.theme = Theme;
+        try { localStorage.setItem("astra-theme", Theme); } catch { /* Storage is optional. */ }
+        UpdateThemeLabel();
+    });
+}
+
 const Menu = document.querySelector(".mobile-toggle");
 const Sidebar = document.querySelector(".sidebar");
 if (Menu && Sidebar) {
@@ -12,11 +29,24 @@ if (Menu && Sidebar) {
         Menu.setAttribute("aria-expanded", String(IsOpen));
         Menu.textContent = IsOpen ? "Close" : "Menu";
     });
+    function CloseMenu() {
+        Sidebar.classList.remove("is-open");
+        Menu.setAttribute("aria-expanded", "false");
+        Menu.textContent = "Menu";
+    }
+    Sidebar.addEventListener("click", Event => { if (Event.target.closest("a")) { CloseMenu(); } });
+    document.addEventListener("keydown", Event => {
+        if (Event.key === "Escape" && Sidebar.classList.contains("is-open")) {
+            CloseMenu();
+            Menu.focus();
+        }
+    });
 }
 
 for (const Block of document.querySelectorAll(".code-block")) {
     const Button = Block.querySelector(".copy-code");
     const Code = Block.querySelector("code");
+    if (!Button || !Code) { continue; }
     const Label = Button.getAttribute("aria-label");
     let FeedbackTimer;
     Button.hidden = false;
@@ -41,7 +71,10 @@ for (const Block of document.querySelectorAll(".code-block")) {
         }, 1600);
     });
 
-    // Tokenize only the displayed text; never interpret source as HTML.
+}
+
+// Tokenize displayed text without interpreting source as HTML.
+function Highlight(Code) {
     if (Code.classList.contains("language-luau") || Code.classList.contains("language-lua")) {
         const Tokens = /(--\[(=*)\[[\s\S]*?\]\2\](?:--)?|--[^\n]*|\[(=*)\[[\s\S]*?\]\3\]|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\b(?:and|break|continue|do|else|elseif|end|export|false|for|function|if|in|local|nil|not|or|repeat|return|then|true|type|until|while)\b|\b\d+(?:\.\d+)?(?:e[+-]?\d+)?\b|\b[A-Za-z_]\w*(?=\s*\())/g;
         const Text = Code.textContent;
@@ -61,6 +94,42 @@ for (const Block of document.querySelectorAll(".code-block")) {
     }
 }
 
+for (const Code of document.querySelectorAll("pre code")) { Highlight(Code); }
+
+const ExampleTabs = document.querySelector(".example-tabs");
+if (ExampleTabs) {
+    const Tabs = [...ExampleTabs.querySelectorAll('[role="tab"]')];
+    const Panes = [...document.querySelectorAll(".example-pane")];
+    function SelectExample(Tab, Animate = true) {
+        for (const Item of Tabs) {
+            const Selected = Item === Tab;
+            Item.setAttribute("aria-selected", String(Selected));
+            Item.tabIndex = Selected ? 0 : -1;
+        }
+        for (const Pane of Panes) {
+            const Selected = Pane.id === Tab.getAttribute("aria-controls");
+            Pane.hidden = !Selected;
+            Pane.classList.toggle("is-entering", Selected && Animate);
+        }
+    }
+    ExampleTabs.hidden = false;
+    SelectExample(Tabs.find(Tab => Tab.getAttribute("aria-selected") === "true"), false);
+    for (const Tab of Tabs) {
+        Tab.addEventListener("click", () => SelectExample(Tab));
+        Tab.addEventListener("keydown", Event => {
+            let Index = Tabs.indexOf(Tab);
+            if (Event.key === "ArrowRight") { Index = (Index + 1) % Tabs.length; }
+            else if (Event.key === "ArrowLeft") { Index = (Index + Tabs.length - 1) % Tabs.length; }
+            else if (Event.key === "Home") { Index = 0; }
+            else if (Event.key === "End") { Index = Tabs.length - 1; }
+            else { return; }
+            Event.preventDefault();
+            SelectExample(Tabs[Index]);
+            Tabs[Index].focus();
+        });
+    }
+}
+
 const Search = document.querySelector(".search-dialog");
 const Trigger = document.querySelector(".search-trigger");
 const Input = document.querySelector("#search-input");
@@ -73,9 +142,10 @@ function ShowResults() {
     const Words = Input.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
     const Ranked = (SearchPages || []).map(Page => {
         const Title = Page.title.toLowerCase();
+        const Headings = Page.headings.join(" ").toLowerCase();
         const Haystack = (Page.title + " " + Page.headings.join(" ") + " " + Page.text).toLowerCase();
         const Matches = Words.every(Word => Haystack.includes(Word));
-        const Score = Words.reduce((Total, Word) => Total + (Title.includes(Word) ? 5 : 0), 0);
+        const Score = Words.reduce((Total, Word) => Total + (Title.includes(Word) ? 8 : 0) + (Headings.includes(Word) ? 4 : 0) + Math.min(3, Haystack.split(Word).length - 1), 0);
         return { Page, Matches, Score };
     }).filter(Item => Item.Matches).sort((A, B) => B.Score - A.Score).slice(0, 12);
 
@@ -97,7 +167,7 @@ function ShowResults() {
 }
 
 async function OpenSearch() {
-    Search.showModal();
+    if (!Search.open) { Search.showModal(); }
     Input.focus();
     if (!SearchPages) {
         Status.textContent = "Loading documentation…";
@@ -120,6 +190,7 @@ if (Search && typeof Search.showModal === "function") {
     Trigger.hidden = false;
     Trigger.addEventListener("click", OpenSearch);
     document.querySelector(".close-search").addEventListener("click", () => Search.close());
+    Search.addEventListener("close", () => Trigger.focus());
     Search.addEventListener("click", Event => { if (Event.target === Search) { Search.close(); } });
     Input.addEventListener("input", ShowResults);
     Input.addEventListener("keydown", Event => {
@@ -129,15 +200,29 @@ if (Search && typeof Search.showModal === "function") {
         }
         if (Event.key === "Enter") { Results.querySelector("a")?.click(); }
     });
+    Results.addEventListener("keydown", Event => {
+        const Links = [...Results.querySelectorAll("a")];
+        const Position = Links.indexOf(document.activeElement);
+        if (Event.key === "ArrowDown") {
+            Event.preventDefault();
+            Links[Math.min(Position + 1, Links.length - 1)]?.focus();
+        } else if (Event.key === "ArrowUp") {
+            Event.preventDefault();
+            if (Position <= 0) { Input.focus(); } else { Links[Position - 1]?.focus(); }
+        }
+    });
     document.addEventListener("keydown", Event => {
-        if ((Event.ctrlKey || Event.metaKey) && Event.key.toLowerCase() === "k") {
+        if (Event.key === "Escape" && Search.open) {
+            Event.preventDefault();
+            Search.close();
+        } else if ((Event.ctrlKey || Event.metaKey) && Event.key.toLowerCase() === "k") {
             Event.preventDefault();
             if (Search.open) { Search.close(); } else { OpenSearch(); }
         }
     });
 }
 
-const Contents = [...document.querySelectorAll(".contents a")];
+const Contents = [...document.querySelectorAll(".contents ul a")];
 if ("IntersectionObserver" in window && Contents.length) {
     const ById = new Map(Contents.map(Link => [Link.hash.slice(1), Link]));
     const Observer = new IntersectionObserver(Entries => {

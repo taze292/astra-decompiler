@@ -19,7 +19,7 @@ Most users need only the executable and [public bridge](../tools/Decompile.luau)
 | `tools/` | Public installation scripts |
 | `docs/`, `site/` | Markdown documentation and site generator |
 
-See the [architecture](../docs/ARCHITECTURE.md) for the pipeline and [current control-flow validation](../docs/OBFUSCATED_CONTROL_FLOW.md) for recent fixes.
+The pipeline validates options and bytecode, builds control flow, reconstructs and simplifies statements, then resolves names and emits source. Analysis state belongs to each request; independent inputs can use batch workers.
 
 ## Build and test
 
@@ -63,10 +63,10 @@ Do not use diagnostic fallback to hide a failed regression case. A generated fil
 ./dev/tools/PackageRelease.ps1
 ```
 
-This writes the Windows ZIP, standalone executable, bridge, and SHA-256 checksums to `artifacts/releases/v0.5.1/`. Both copies of `Decompile.luau` contain the actual matching public bridge, so installation needs no download, published tag, or push. The optional online loader remains at [`tools/LoadDecompiler.luau`](../tools/LoadDecompiler.luau).
+This writes the Windows ZIP, standalone executable, bridge, and SHA-256 checksums under `artifacts/releases/`. When packaging a new version, pass `-Version` matching `CMakeLists.txt`. The package includes the matching bridge. The optional online loader is [`tools/LoadDecompiler.luau`](../tools/LoadDecompiler.luau).
 
 ## Live checks and documentation
 
 After starting the local server and installing the public bridge, [AuditControlFlow.luau](tools/AuditControlFlow.luau) compiles generated output without executing the target modules. [TestCameraModule.luau](tools/TestCameraModule.luau) exercises output variants. [PrepareRobloxTest.ps1](tools/PrepareRobloxTest.ps1) generates the controlled Roblox fixture harness.
 
-Build and validate the documentation with `python site/build.py`. Follow the [Pages guide](../docs/GITHUB_PAGES.md) to preview or publish it. Source snippets and raw HTML are escaped, and local links are checked during the build.
+Build and validate the documentation with `python site/build.py`. The [site README](../site/README.md) covers previewing and GitHub Pages. Source snippets and raw HTML are escaped, and local links are checked during the build.

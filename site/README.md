@@ -1,37 +1,46 @@
-# Documentation site
+# Website
 
-The Astra site is generated from Markdown with Python 3.11+ and no third-party packages. [Preview and publishing instructions](../docs/GITHUB_PAGES.md) cover local use and GitHub Pages.
+The site uses Python 3.11+ and no third-party Python packages.
+
+## Local preview
 
 ```powershell
 python site/build.py
 python -m http.server 8000 --directory artifacts/pages
 ```
 
-Open `http://localhost:8000`. Rebuild and reload after changing source. Generated HTML belongs in ignored `artifacts/pages/`.
+Open `http://localhost:8000`. Rebuild and reload after edits. Generated pages, font caches, and local captures belong under ignored `artifacts/`.
 
-## Content and navigation
+The first build obtains Satoshi and Switzer from the official Fontshare packages and caches them in `artifacts/site-fonts/`. JetBrains Mono is bundled with its OFL notice. The generated site serves all fonts locally.
 
-`site/landing.html` is the landing page at `index.html`; `docs/INDEX.md` is the documentation introduction at `docs.html`. The public site publishes only the six user guides listed in `PUBLIC_DOCUMENTS` in `build.py`. Repository-only developer reports, publishing instructions, migration history, and README files are excluded from both output and search. Previously generated private routes are removed when rebuilding an existing output directory.
+## Content
 
-Supported Markdown includes headings, paragraphs, fenced code, tables, nested lists, quotes, inline code, links, images, bold, and italic. This covers the GFM used by the repository. Raw HTML and source snippets are escaped, never executed.
+Only the six guides in `PUBLIC_DOCUMENTS` are published and searched. Source Markdown stays readable on GitHub. Old report routes are removed when rebuilding.
 
-## Theme and assets
+| Source | Purpose |
+| --- | --- |
+| `landing.html` | Hero, links, and source/output example |
+| `../docs/` | Installation, customization, integrations, options, and building |
+| `styles.css` | Shared themes, code colors, layout, and motion |
+| `app.js` | Theme switch, example tabs, copy buttons, search, and navigation |
+| `theme.js` | Apply the saved theme before painting |
+| `assets/` | Astra star logo, official Luau logo, icons, fonts, and notices |
+| `examples/` | Supplied sample source and output; displayed without execution |
 
-- `styles.css`: Astra's dark responsive layout, print styles, and reduced-motion support.
-- `landing.html`: a lightweight home page linking to the docs, latest release, and Discord.
-- `app.js`: mobile navigation, local full-text search, copy buttons, Luau highlighting, and table of contents tracking.
-- `assets/astra.svg`: gradient A logo, also used as the favicon and README mark.
+Search runs locally against generated JSON. Internal navigation and search results stay in the current tab; external web links open in new tabs. Without JavaScript, documentation navigation and both example panels remain available.
 
-Content and navigation remain available without JavaScript. Search uses a generated local JSON file; it does not call an external service. Code highlighting inserts text nodes and never interprets source as HTML. No CDN or framework runtime is required.
+Reduced-motion visitors get gentle fades. The toggle and hover states use short transitions.
 
-Hover, focus, dialogs, and navigation use short CSS transitions. Motion is disabled when the visitor requests reduced motion. Release links follow the repository's latest GitHub release; the ZIP must be uploaded separately when publishing a release.
+## Checks and GitHub Pages
 
-## Build checks
+Every build validates local links, heading anchors, SVG symbols, and repository file references. All site links are relative so project Pages subpaths work.
 
-Each build verifies local page and asset links, heading anchors, and repository file references. URLs are relative, so project Pages subpaths and local previews use the same output. GitHub Actions supplies `GITHUB_REPOSITORY` and `GITHUB_SHA` for source links. To override them locally:
+The **Astra documentation** workflow builds pull requests and deploys the default branch. For a new repository, choose **GitHub Actions** in **Settings > Pages**, then run the workflow.
+
+The build gets repository identity and source-link revisions from GitHub Actions. To override them locally:
 
 ```powershell
 python site/build.py --repository YourName/astra-decompiler --ref main
 ```
 
-The workflow builds pull requests and deploys only the default branch. It never commits generated files.
+Commit the sources and licenses. Generated HTML and Fontshare font binaries stay out of Git.
