@@ -35,6 +35,11 @@ set_tests_properties(CoreValidation PROPERTIES TIMEOUT 30)
 add_executable(astra-compile dev/tools/Compile.cpp)
 target_link_libraries(astra-compile PRIVATE Luau.Compiler Luau.VM)
 
+# Decompiles a bytecode corpus, recompiles every result, and compares chunk structure.
+add_executable(astra-corpus dev/tools/Corpus.cpp)
+target_link_libraries(astra-corpus PRIVATE AstraDecompiler Luau.Compiler)
+target_include_directories(astra-corpus PRIVATE ${ASTRA_INTERNAL_INCLUDE_DIRS} "${ASTRA_LUAU_DIR}/Common/include")
+
 if(WIN32)
     find_program(ASTRA_POWERSHELL NAMES pwsh powershell)
     if(ASTRA_POWERSHELL)

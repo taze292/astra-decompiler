@@ -28,6 +28,7 @@ add_library(AstraDecompiler
     src/analysis/Exports.cpp
     src/reconstruction/Analysis.cpp
     src/reconstruction/Expressions.cpp
+    src/reconstruction/Format.cpp
     src/reconstruction/Lowering.cpp
     src/reconstruction/Optimize.cpp
     src/reconstruction/Predicates.cpp

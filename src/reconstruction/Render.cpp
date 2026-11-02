@@ -54,18 +54,27 @@ std::string Function::Render(const std::vector<Statement> &Nodes, unsigned Inden
     };
     Group Previous = Group::None;
     std::string PreviousReceiver;
-    if (auto Found = ScopedDeclarations.find(&Nodes); Found != ScopedDeclarations.end())
+    // A variable first assigned in branches (or used before any plain
+    // assignment) is declared just before the first statement of its scope
+    // that mentions it, rather than at the top of the scope.
+    std::function<bool(const Statement &, unsigned)> Mentions = [&](const Statement &S, unsigned U)
     {
-        std::vector<std::string> Names;
+        if (S.Text.find(Token(U)) != std::string::npos || std::find(S.Left.begin(), S.Left.end(), U) != S.Left.end() ||
+            std::find(S.Lifetime.begin(), S.Lifetime.end(), U) != S.Lifetime.end())
+            return true;
+        return std::any_of(S.Body.begin(), S.Body.end(), [&](const Statement &C) { return Mentions(C, U); }) ||
+               std::any_of(S.Else.begin(), S.Else.end(), [&](const Statement &C) { return Mentions(C, U); });
+    };
+    std::map<std::size_t, std::vector<unsigned>> Declarations;
+    if (auto Found = ScopedDeclarations.find(&Nodes); Found != ScopedDeclarations.end())
         for (auto Id : Found->second)
-            if (Declared.insert(Id).second)
-                Names.push_back(Token(Id));
-        if (!Names.empty())
-        {
-            Line("local " + Join(Names));
-            Separate();
-        }
-    }
+            if (!Declared.count(Id))
+            {
+                std::size_t First = 0;
+                while (First < Nodes.size() && !Mentions(Nodes[First], Id))
+                    ++First;
+                Declarations[First < Nodes.size() ? First : 0].push_back(Id);
+            }
     for (std::size_t N = 0; N < Nodes.size(); ++N)
     {
         const auto &S = Nodes[N];
@@ -105,6 +114,15 @@ std::string Function::Render(const std::vector<Statement> &Nodes, unsigned Inden
             (!Receiver.empty() && !PreviousReceiver.empty() && Receiver != PreviousReceiver);
         if (Previous != Group::None && Boundary)
             Separate();
+        if (auto Found = Declarations.find(N); Found != Declarations.end())
+        {
+            std::vector<std::string> Names;
+            for (auto Id : Found->second)
+                if (Declared.insert(Id).second)
+                    Names.push_back(Token(Id));
+            if (!Names.empty())
+                Line("local " + Join(Names));
+        }
         switch (S.Type)
         {
         case Kind::Assign:
@@ -125,14 +143,34 @@ std::string Function::Render(const std::vector<Statement> &Nodes, unsigned Inden
                 Line(FunctionText);
             }
             else
-                Line((AllNew ? "local " : "") + Join(Names) + " = " + CleanExpression(S.Left.size() == 1 ? Unwrap(S.Text) : S.Text));
+            {
+                auto Value = SimplifyList(S.Text, S.Left.size() > 1);
+                Line((AllNew ? "local " : "") + Join(Names) + " = " + CleanExpression(S.Left.size() == 1 ? Unwrap(Value) : Value));
+            }
             for (auto Id : S.Left)
                 Declared.insert(Id);
             break;
         }
         case Kind::Raw:
         {
-            auto Text = CleanExpression(S.Text);
+            if (S.Expand)
+            {
+                // An open array tail that did not fold into its constructor
+                // stores every value, including nils, from index n onward.
+                auto Open = S.Text.find('[');
+                auto Close = Closing(S.Text, Open);
+                auto Values = Token(E.New("Values", Id, true));
+                auto Inner = Indentation(E.Settings);
+                auto Value = SimplifyList(S.Text.substr(Close + 4), true);
+                Replace(Value, "\n", "\n" + Inner);
+                Line("do");
+                Line(Inner + "local " + Values + " = table.pack(" + Value + ")");
+                Line(Inner + "table.move(" + Values + ", 1, " + Values + ".n, " + S.Text.substr(Open + 1, Close - Open - 1) + ", " +
+                     S.Text.substr(0, Open) + ")");
+                Line("end");
+                break;
+            }
+            auto Text = CleanExpression(SimplifyStatement(S.Text));
             auto Equal = Text.find(" = ");
             if (Equal != std::string::npos && PrefixExpression(Text.substr(0, Equal)))
                 Text = Text.substr(0, Equal + 3) + CleanExpression(Unwrap(Text.substr(Equal + 3)));
@@ -140,6 +178,7 @@ std::string Function::Render(const std::vector<Statement> &Nodes, unsigned Inden
             if (Text.starts_with('('))
             {
                 Line("do");
+                Replace(Text, "\n", "\n" + Indentation(E.Settings));
                 Line(Indentation(E.Settings) + Text);
                 Line("end");
             }
@@ -151,7 +190,7 @@ std::string Function::Render(const std::vector<Statement> &Nodes, unsigned Inden
             Line(S.Text);
             break;
         case Kind::Return:
-            Line(S.Text.empty() ? "return" : "return " + CleanExpression(S.Text));
+            Line(S.Text.empty() ? "return" : "return " + CleanExpression(SimplifyList(S.Text, true)));
             break;
         case Kind::Break:
             Line("break");
@@ -169,7 +208,7 @@ std::string Function::Render(const std::vector<Statement> &Nodes, unsigned Inden
                 Line("do");
             if (S.Type == Kind::If)
             {
-                auto Test = FormatCondition(S.Text);
+                auto Test = SimplifyCondition(FormatCondition(S.Text));
                 if (Test.size() + Pad.size() > 110)
                     for (const auto *Operator : {" or ", " and "})
                     {
@@ -182,11 +221,26 @@ std::string Function::Render(const std::vector<Statement> &Nodes, unsigned Inden
                 Line("if " + Test + " then");
             }
             if (S.Type == Kind::While)
-                Line("while " + FormatCondition(S.Text) + " do");
+                Line("while " + SimplifyCondition(FormatCondition(S.Text)) + " do");
             if (S.Type == Kind::Repeat)
                 Line("repeat");
             if (S.Type == Kind::For)
-                Line("for " + S.Text + " do");
+            {
+                // Loop variables are plain names; simplify the expressions after `=` or `in`.
+                auto Header = S.Text;
+                auto Generic = Header.find(" in "), Numeric = Header.find(" = ");
+                if (Generic != std::string::npos && (Numeric == std::string::npos || Generic < Numeric))
+                    Header = Header.substr(0, Generic + 4) + SimplifyList(Header.substr(Generic + 4), true);
+                else if (Numeric != std::string::npos)
+                {
+                    // A step of exactly 1 is the default.
+                    auto Range = SplitLogical(SimplifyList(Header.substr(Numeric + 3), false), ", ");
+                    if (Range.size() == 3 && Range[2] == "1")
+                        Range.pop_back();
+                    Header = Header.substr(0, Numeric + 3) + Join(Range);
+                }
+                Line("for " + Header + " do");
+            }
             auto InnerDeclared = Declared;
             for (auto Id : S.Left)
                 InnerDeclared.insert(Id);
@@ -204,7 +258,7 @@ std::string Function::Render(const std::vector<Statement> &Nodes, unsigned Inden
                 Line("else");
                 Out += Render(S.Else, Indent + 1, InnerDeclared, Hoist);
             }
-            Line(S.Type == Kind::Repeat ? "until " + FormatCondition(S.Text) : "end");
+            Line(S.Type == Kind::Repeat ? "until " + SimplifyCondition(FormatCondition(S.Text)) : "end");
             break;
         }
         default:
@@ -336,6 +390,28 @@ std::string Function::Generate(bool Main)
     // Remove the compiler's implicit empty return at the end of a chunk/function.
     if (!Nodes.empty() && Nodes.back().Type == Kind::Return && Nodes.back().Text.empty())
         Nodes.pop_back();
+
+    // Loop variables the body never reads are conventionally named `_`.
+    std::function<bool(const Statement &, unsigned)> Reads = [&](const Statement &S, unsigned U)
+    {
+        if (S.Text.find(Token(U)) != std::string::npos || std::find(S.Lifetime.begin(), S.Lifetime.end(), U) != S.Lifetime.end())
+            return true;
+        return std::any_of(S.Body.begin(), S.Body.end(), [&](const Statement &C) { return Reads(C, U); }) ||
+               std::any_of(S.Else.begin(), S.Else.end(), [&](const Statement &C) { return Reads(C, U); });
+    };
+    std::function<void(const std::vector<Statement> &)> Discard = [&](const auto &List)
+    {
+        for (const auto &S : List)
+        {
+            if (S.Type == Kind::For && !Dispatch)
+                for (auto U : S.Left)
+                    if (!E.Symbols[U].Debug && std::none_of(S.Body.begin(), S.Body.end(), [&](const Statement &C) { return Reads(C, U); }))
+                        E.Symbols[U].Discard = true;
+            Discard(S.Body);
+            Discard(S.Else);
+        }
+    };
+    Discard(Nodes);
 
     using Scope = const std::vector<Statement> *;
     std::map<unsigned, std::vector<Scope>> Occurrences;
@@ -609,7 +685,9 @@ std::string Function::Generate(bool Main)
             break;
         }
     }
-    Hoist.insert(ScopedDeclarations[&Nodes].begin(), ScopedDeclarations[&Nodes].end());
+    // A dispatch loop jumps between states, so its locals stay function-wide.
+    if (Dispatch)
+        Hoist.insert(ScopedDeclarations[&Nodes].begin(), ScopedDeclarations[&Nodes].end());
     if (Dispatch)
         for (auto U : Registers)
             if (Referenced.count(U) && !E.Symbols[U].Parameter)

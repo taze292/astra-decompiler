@@ -63,6 +63,7 @@ std::string_view CanonicalOptionKey(std::string_view Key)
         {"MaxInputBytes", "max-input-bytes"},
         {"MaxOutputBytes", "max-output-bytes"},
         {"FilterLineField", "filter-line"},
+        {"VectorConstructor", "vector-constructor"},
         {"ModulePath", "module-path"},
     };
     for (const auto &[Pascal, Cli] : Names)
@@ -187,6 +188,8 @@ void ApplyOption(Options &S, std::string_view Key, std::string_view Value)
         S.MaxOutputBytes = Integer(Value);
     else if (Key == "filter-line")
         S.FilterLineField = Value;
+    else if (Key == "vector-constructor")
+        S.VectorConstructor = Value;
     else if (Key == "module-path")
         S.ModulePath = Value;
     else
@@ -211,6 +214,22 @@ void ValidateOptions(const Options &S)
         throw Error("Invalid variable naming");
     if (S.FilterLineField != "Line" && S.FilterLineField != "StartLine")
         throw Error("Filter field must be Line or StartLine");
+    {
+        // A dotted path of ASCII identifiers, such as Vector3.new or vector.create.
+        bool Start = true, Valid = !S.VectorConstructor.empty() && S.VectorConstructor.size() <= 64;
+        for (char C : S.VectorConstructor)
+        {
+            bool Letter = (C >= 'a' && C <= 'z') || (C >= 'A' && C <= 'Z') || C == '_';
+            if (C == '.' && !Start)
+                Start = true;
+            else if (Letter || (!Start && C >= '0' && C <= '9'))
+                Start = false;
+            else
+                Valid = false;
+        }
+        if (!Valid || Start)
+            throw Error("Vector constructor must be a dotted identifier path such as Vector3.new");
+    }
     if (S.ModulePath.size() > 8192 ||
         std::any_of(S.ModulePath.begin(), S.ModulePath.end(), [](unsigned char C) { return C < 32 || C >= 127; }))
         throw Error("Module path must be a single-line ASCII expression with escaped names (maximum 8192 bytes)");

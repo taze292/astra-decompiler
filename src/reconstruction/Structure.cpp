@@ -309,6 +309,13 @@ std::vector<Statement> Function::Region(unsigned Start, unsigned End, int BreakT
     while (Pos != Limit && Pos < P.Instructions.size())
     {
         E.Analysis.Spend();
+        // Instructions no path reaches (for example after an infinite loop)
+        // have no effect; obfuscators also plant loops there.
+        if (Pos && Flow.Dominators[Pos] < 0)
+        {
+            ++Pos;
+            continue;
+        }
         if (RegionVisits.empty())
             RegionVisits.resize(P.Instructions.size());
         if (++RegionVisits[Pos] > 12)
@@ -351,7 +358,7 @@ std::vector<Statement> Function::Region(unsigned Start, unsigned End, int BreakT
                     Cleanup.push_back(Node);
                     Target = int(Next.Next);
                 }
-                else if (unsigned(Target) >= End && !Jump(Next.Op) && !Conditional(Next.Op) && Next.Op != LOP_CMPPROTO &&
+                else if (unsigned(Target) > End && !Jump(Next.Op) && !Conditional(Next.Op) && Next.Op != LOP_CMPPROTO &&
                          !(Next.Op == LOP_LOADB && Next.C) && Next.Op != LOP_FORNPREP && Next.Op != LOP_FORNLOOP &&
                          Next.Op != LOP_FORGPREP && Next.Op != LOP_FORGPREP_NEXT && Next.Op != LOP_FORGPREP_INEXT &&
                          Next.Op != LOP_FORGLOOP)
@@ -578,6 +585,12 @@ std::vector<Statement> Function::Region(unsigned Start, unsigned End, int BreakT
                     Pos += 3;
                     continue;
                 }
+            }
+            // `a and b or c` style value expressions become one assignment.
+            if (unsigned Resume; ShortCircuitValue(Pos, Limit, Out, Resume))
+            {
+                Pos = Resume;
+                continue;
             }
             // Adjacent tests with the same destination form one short-circuit
             // condition. Reconstructing their arms independently duplicates the

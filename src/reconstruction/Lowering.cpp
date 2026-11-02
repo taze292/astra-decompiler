@@ -87,7 +87,11 @@ std::string Function::ConstantAt(unsigned Index, unsigned Recursion) const
     case LBC_CONSTANT_VECTORD:
         if (K.Vector[3] != 0)
             throw Error("Four-component vector constants require a four-component target runtime");
-        return "vector.create(" + Number(K.Vector[0]) + ", " + Number(K.Vector[1]) + ", " + Number(K.Vector[2]) + ")";
+    {
+        bool Single = K.Tag == LBC_CONSTANT_VECTOR;
+        return E.Settings.VectorConstructor + "(" + Number(K.Vector[0], Single) + ", " + Number(K.Vector[1], Single) + ", " +
+               Number(K.Vector[2], Single) + ")";
+    }
     case LBC_CONSTANT_INTEGER:
         return "integer.fromstring(" + Quote((K.Negative ? "-" : "") + std::to_string(K.Integer)) + ")";
     case LBC_CONSTANT_TABLE:
@@ -158,6 +162,29 @@ std::string Function::Member(const std::string &Object, unsigned Index) const
     const auto &K = P.Constants.at(Index);
     return Object + (K.Tag == LBC_CONSTANT_STRING && Identifier(K.Text) ? "." + K.Text : "[" + ConstantAt(Index) + "]");
 }
+std::string Function::TableText(const std::vector<std::pair<std::string, std::string>> &Fields) const
+{
+    std::vector<std::string> Items;
+    bool Multiline = false;
+    for (const auto &[Key, Value] : Fields)
+        if (!Value.empty())
+        {
+            Items.push_back(Key.empty() ? Value : Key + " = " + Value);
+            Multiline |= Value.find('\n') != std::string::npos;
+        }
+    if (Items.empty())
+        return "{}";
+    if (Items.size() <= 3 && !Multiline)
+        return "{ " + Join(Items) + " }";
+    const std::string Indent(E.Settings.UseTabs ? 1 : E.Settings.IndentWidth, E.Settings.UseTabs ? '\t' : ' ');
+    std::string Text = "{\n";
+    for (auto Item : Items)
+    {
+        Replace(Item, "\n", "\n" + Indent);
+        Text += Indent + Item + ",\n";
+    }
+    return Text + "}";
+}
 std::string Function::Global(unsigned Index) const
 {
     const auto &Name = P.Constants.at(Index).Text;
@@ -171,6 +198,45 @@ Statement Function::Assign(unsigned R, const Instruction &I, std::string Value, 
     return {Kind::Assign, {S}, std::move(Value), {}, {}, Pure, Call};
 }
 
+bool Function::SingleResultBuiltin(const Instruction &Call) const
+{
+    // At O2 Luau gives a call to a builtin that always returns one value a
+    // fixed result count, even as a final argument. Such a call needs no
+    // truncating parentheses. The builtin is identified by the FASTCALL whose
+    // fallback is this CALL.
+    for (auto Pos = Index(Call.Pc), Steps = 0u; Pos-- > 0 && Steps < 16; ++Steps)
+    {
+        const auto &I = P.Instructions[Pos];
+        if (!Luau::isFastCall(I.Op))
+            continue;
+        if (I.Op == LOP_FASTPCALL || I.Op == LOP_FINCONSTRUCT || I.Pc + I.C + 1 != Call.Pc)
+            return false;
+        switch (LuauBuiltinFunction(I.A))
+        {
+        case LBF_NONE:
+        case LBF_ASSERT:
+        case LBF_MATH_FREXP:
+        case LBF_MATH_MODF:
+        case LBF_STRING_BYTE:
+        case LBF_TABLE_INSERT:
+        case LBF_TABLE_UNPACK:
+        case LBF_TABLE_CLEAR:
+        case LBF_SELECT_VARARG:
+        case LBF_BUFFER_WRITEU8:
+        case LBF_BUFFER_WRITEU16:
+        case LBF_BUFFER_WRITEU32:
+        case LBF_BUFFER_WRITEF32:
+        case LBF_BUFFER_WRITEF64:
+        case LBF_BUFFER_WRITEINTEGER:
+            return false;
+        default:
+            // Builtins newer than this table may return any number of values.
+            return I.A <= LBF_TABLE_CLEAR;
+        }
+    }
+    return false;
+}
+
 std::string Function::Signature() const
 {
     std::vector<std::string> Args;
@@ -179,6 +245,37 @@ std::string Function::Signature() const
     if (P.Vararg)
         Args.push_back("...");
     return "(" + Join(Args) + ")";
+}
+
+bool Function::FixedCapture(unsigned Symbol, unsigned Register, unsigned Capture) const
+{
+    // A copy capture can name the binding directly when nothing assigns that
+    // binding again after the closure exists. A loop's own iteration write
+    // instead starts a fresh body-scoped local for each iteration.
+    if (Dispatch || WriteSymbols.empty())
+        return false;
+    std::vector<bool> Seen(P.Instructions.size());
+    std::vector<unsigned> Pending(Flow.Successors[Capture].begin(), Flow.Successors[Capture].end());
+    while (!Pending.empty())
+    {
+        unsigned N = Pending.back();
+        Pending.pop_back();
+        if (N >= P.Instructions.size() || Seen[N])
+            continue;
+        Seen[N] = true;
+        E.Analysis.Spend();
+        const auto &I = P.Instructions[N];
+        for (unsigned W : Writes(I, P))
+        {
+            if (W != Register || WriteSymbols[N][W] != Symbol)
+                continue;
+            bool Iteration = (I.Op == LOP_FORGLOOP && W >= I.A + 3) || (I.Op == LOP_FORNLOOP && W == I.A + 2);
+            if (!Iteration || I.Target() < 0 || Index(unsigned(I.Target())) > Capture || Capture >= N)
+                return false;
+        }
+        Pending.insert(Pending.end(), Flow.Successors[N].begin(), Flow.Successors[N].end());
+    }
+    return true;
 }
 
 std::string Function::Closure(const Instruction &I, std::vector<Statement> &Out)
@@ -238,11 +335,12 @@ std::string Function::Closure(const Instruction &I, std::vector<Statement> &Out)
             unsigned S = SymbolAt(R, I.Pc);
             unsigned Definitions = DefinitionCounts[S];
             bool Loop = LoopCaptures[Index(I.Pc)];
-            if (Definitions == 1 && !Loop)
+            if ((Definitions == 1 && !Loop) || FixedCapture(S, R, Index(I.Pc)))
             {
                 U.Value = Read(R, I.Pc);
                 U.Cell.clear();
                 E.Symbols[S].Keep = true;
+                E.Symbols[S].Captured = true;
                 Captures.push_back(std::move(U));
                 continue;
             }
@@ -369,7 +467,7 @@ void Function::Simple(const Instruction &I, std::vector<Statement> &Out)
             E.Symbols[S].Keep = Keep;
         }
     };
-    auto Many = [&](unsigned Base, unsigned Count, const std::string &Text)
+    auto Many = [&](unsigned Base, unsigned Count, const std::string &Text, bool MultiValue = true)
     {
         std::vector<unsigned> Lhs;
         bool Box = false;
@@ -389,7 +487,7 @@ void Function::Simple(const Instruction &I, std::vector<Statement> &Out)
             Emit(Join(Names) + " = " + Text);
         }
         else
-            Out.push_back({Kind::Assign, std::move(Lhs), Text, {}, {}, false, true});
+            Out.push_back({Kind::Assign, std::move(Lhs), Text, {}, {}, false, MultiValue});
     };
     auto CanInlineOpen = [&]()
     {
@@ -410,12 +508,33 @@ void Function::Simple(const Instruction &I, std::vector<Statement> &Out)
             ReceiverPc = Method.Pc;
             Next = Index(Method.Next);
         }
+        // Luau places a builtin's FASTCALL, and then the fallback's function
+        // import, between the final argument and the CALL that consumes it.
+        // Closing native captures before a return leaves the open values intact.
+        unsigned Imported = P.Stack;
+        while (Receiver == P.Stack && Next < P.Instructions.size() && Flow.Predecessors[Next].size() == 1)
+        {
+            const auto &Between = P.Instructions[Next];
+            if (Between.Op == LOP_GETIMPORT && Imported == P.Stack && Between.A < I.A)
+                Imported = Between.A;
+            else if (Between.Op == LOP_CLOSEUPVALS && Imported == P.Stack)
+            {
+                if (std::any_of(Cells.begin(), Cells.end(), [&](unsigned Reg) { return Reg >= Between.A; }))
+                    return false;
+            }
+            else if (!Luau::isFastCall(Between.Op) || Between.Op == LOP_FINCONSTRUCT || Imported != P.Stack)
+                break;
+            Next = Index(Between.Next);
+        }
         if (Next >= P.Instructions.size() || Flow.Predecessors[Next].size() != 1)
             return false;
         const auto &Consumer = P.Instructions[Next];
+        if (Imported != P.Stack && Consumer.A != Imported)
+            return false;
         bool Call = (Consumer.Op == LOP_CALL || Consumer.Op == LOP_CALLFB) && !Consumer.B && Consumer.A < I.A;
         bool Return = Consumer.Op == LOP_RETURN && !Consumer.B && Consumer.A <= I.A;
-        if (!Call && !Return)
+        bool List = Consumer.Op == LOP_SETLIST && !Consumer.C && Consumer.B <= I.A && Imported == P.Stack;
+        if (!Call && !Return && !List)
             return false;
         // Moving a call into an expression must not move a mutable capture read
         // before that call. Ordinary SSA locals already snapshot these values.
@@ -426,7 +545,7 @@ void Function::Simple(const Instruction &I, std::vector<Statement> &Out)
         };
         if (Receiver != P.Stack && !Stable(Receiver, ReceiverPc))
             return false;
-        unsigned Start = Receiver == P.Stack ? Consumer.A : Consumer.A + 2;
+        unsigned Start = List ? Consumer.B : Receiver == P.Stack ? Consumer.A : Consumer.A + 2;
         for (unsigned Reg = Start; Reg < I.A; ++Reg)
             if (!Stable(Reg, Consumer.Pc))
                 return false;
@@ -497,7 +616,10 @@ void Function::Simple(const Instruction &I, std::vector<Statement> &Out)
             Path = J ? Member(Path, Part) : Global(Part);
         }
         Hints[SymbolAt(I.A, I.Pc, true)] = Path;
-        Set(Path);
+        ImportPaths.insert(Path);
+        // Imports resolve once when the closure loads; Luau itself reorders
+        // them freely around argument evaluation.
+        Set(Path, true);
         break;
     }
     case LOP_GETTABLE:
@@ -596,6 +718,9 @@ void Function::Simple(const Instruction &I, std::vector<Statement> &Out)
             throw Error("NAMECALL contains a method name that cannot be expressed with colon syntax");
         std::string Call = Callable + "(" + Join(Args) + ")";
         std::string ResultHint;
+        // Services and modules are conventionally bound to locals; other
+        // inferred names only label a value that may still be inlined.
+        bool Conventional = Method && PendingMethod == "GetService";
         if (Method && (PendingMethod == "GetService" || PendingMethod == "WaitForChild" || PendingMethod == "FindFirstChild") && I.B > 2)
             ResultHint = Hints[SymbolAt(Start, I.Pc)];
         else if (Method && (PendingMethod == "Connect" || PendingMethod == "Once"))
@@ -606,14 +731,51 @@ void Function::Simple(const Instruction &I, std::vector<Statement> &Out)
         {
             auto CallableHint = Hints[SymbolAt(I.A, I.Pc)];
             if (CallableHint == "require")
+            {
                 ResultHint = I.B ? Hints[SymbolAt(I.A + 1, I.Pc)] : OpenHint;
+                Conventional = true;
+            }
             else if (CallableHint.ends_with(".new"))
                 ResultHint = CallableHint.substr(0, CallableHint.size() - 4);
             if (CallableHint == "Instance.new" && I.B > 1 && !Hints[SymbolAt(Start, I.Pc)].empty())
                 ResultHint = Hints[SymbolAt(Start, I.Pc)];
         }
+        // A getter called with a single name-like string is named after it:
+        // Data:Get("Coins"), getUserFlag("Flag"), FindFirstChildOfClass("Humanoid").
+        if (ResultHint.empty() && E.Settings.InferCallNames && I.C == 2 && I.B == (Method ? 3u : 2u))
+        {
+            std::string Callee = Method ? PendingMethod : Hints[SymbolAt(I.A, I.Pc)];
+            Callee = Callee.substr(Callee.rfind('.') == std::string::npos ? 0 : Callee.rfind('.') + 1);
+            bool Getter = (Callee.starts_with("Get") || Callee.starts_with("get") || Callee.starts_with("Find") ||
+                           Callee.starts_with("find")) &&
+                          !Callee.ends_with("Signal") && !Callee.ends_with("Event") && Callee != "GetService";
+            for (auto Pos = Index(I.Pc); Getter && Pos-- > 0;)
+            {
+                const auto &Load = P.Instructions[Pos];
+                if (Load.Op == LOP_NAMECALL || Luau::isFastCall(Load.Op))
+                    continue;
+                if (Load.Op == LOP_LOADK && Load.A == Start && P.Constants[unsigned(Load.D)].Tag == LBC_CONSTANT_STRING)
+                {
+                    const auto &Text = P.Constants[unsigned(Load.D)].Text;
+                    if (!Text.empty() && Text.size() <= 40 && std::isalpha(static_cast<unsigned char>(Text[0])) &&
+                        std::all_of(Text.begin(), Text.end(), [](unsigned char C) { return std::isalnum(C) || C == '_' || C == ' '; }))
+                        ResultHint = Text;
+                }
+                break;
+            }
+        }
         if (!ResultHint.empty())
-            Hint(ResultHint, I.C == 2, E.Settings.InferCallNames);
+            Hint(ResultHint, I.C == 2 && Conventional, E.Settings.InferCallNames);
+        // `local self = setmetatable({}, Class)` is the constructor idiom.
+        if (E.Settings.InferCallNames && !Method && Depth > 0 && I.C == 2 && I.B == 3 && Hints[SymbolAt(I.A, I.Pc)] == "setmetatable")
+        {
+            unsigned S = SymbolAt(I.A, I.Pc, true);
+            if (!E.Symbols[S].Keep && !E.Symbols[S].Debug)
+            {
+                E.Rename(S, E.New("self", Id, false, false, false, true));
+                Hints[S] = "self";
+            }
+        }
         if (E.Settings.InferCallNames && Method && PendingMethod == "GetService" && I.C == 2 && I.B == 3)
         {
             auto Previous = Index(I.Pc);
@@ -638,7 +800,7 @@ void Function::Simple(const Instruction &I, std::vector<Statement> &Out)
         PendingMethod.clear();
         PendingReceiver.clear();
         if (I.C)
-            Many(I.A, I.C - 1, Call);
+            Many(I.A, I.C - 1, Call, !SingleResultBuiltin(I));
         else if (CanInlineOpen())
         {
             OpenExpression = Call;
@@ -764,15 +926,44 @@ void Function::Simple(const Instruction &I, std::vector<Statement> &Out)
         break;
     }
     case LOP_NEWTABLE:
-        Set("{}");
-        break;
     case LOP_DUPTABLE:
-        Set(ConstantAt(unsigned(I.D)));
+    {
+        std::vector<std::pair<std::string, std::string>> Fields;
+        if (I.Op == LOP_DUPTABLE)
+            for (auto [Key, Value] : P.Constants.at(unsigned(I.D)).Entries)
+            {
+                const auto &Name = P.Constants.at(Key);
+                Fields.emplace_back(Name.Tag == LBC_CONSTANT_STRING && Identifier(Name.Text) ? Name.Text : "[" + ConstantAt(Key) + "]",
+                                    Value < 0 ? std::string() : ConstantAt(unsigned(Value)));
+            }
+        auto Node = Assign(I.A, I, TableText(Fields));
+        if (Node.Type == Kind::Assign)
+        {
+            Node.Constructor = true;
+            Node.Fields = std::move(Fields);
+        }
+        Out.push_back(std::move(Node));
         break;
+    }
     case LOP_SETLIST:
+    {
+        auto Item = [&](unsigned Index, std::string Value, bool Expand = false)
+        {
+            Statement Store{Kind::Raw, {}, R(I.A) + "[" + std::to_string(Index) + "] = " + Value};
+            Store.ListItem = true;
+            Store.Expand = Expand;
+            Out.push_back(std::move(Store));
+        };
         if (I.C)
             for (unsigned J = 0; J + 1 < I.C; ++J)
-                Emit(R(I.A) + "[" + std::to_string(I.Aux + J) + "] = " + R(I.B + J));
+                Item(I.Aux + J, R(I.B + J));
+        else if (!OpenExpression.empty() && OpenExpressionBase >= I.B)
+        {
+            for (unsigned J = I.B; J < OpenExpressionBase; ++J)
+                Item(I.Aux + J - I.B, R(J));
+            Item(I.Aux + OpenExpressionBase - I.B, std::move(OpenExpression), true);
+            OpenExpression.clear();
+        }
         else if (int Base = OpenBaseAt(I.Pc); Base >= int(I.B))
         {
             NeedsPack = true;
@@ -796,11 +987,18 @@ void Function::Simple(const Instruction &I, std::vector<Statement> &Out)
                  "]\nend");
         }
         break;
+    }
     case LOP_GETVARARGS:
         if (!I.B && CanInlineOpen())
         {
             OpenExpression = "...";
             OpenExpressionBase = I.A;
+            break;
+        }
+        // A fixed vararg load is an ordinary adjusted list: `local a, b = ...`.
+        if (I.B > 1)
+        {
+            Many(I.A, I.B - 1, "...");
             break;
         }
         NeedsVarargs = true;
@@ -817,6 +1015,10 @@ void Function::Simple(const Instruction &I, std::vector<Statement> &Out)
         break;
     case LOP_NEWCLASS:
     case LOP_NEWCLASSMEMBER:
+    case LOP_CONSTRUCT:
+    case LOP_FINCONSTRUCT:
+    case LOP_GETPRIVATEFIELD:
+    case LOP_SETPRIVATEFIELD:
         throw Error("Experimental class bytecode is parsed, but stable Roblox has no equivalent source construct");
     default:
         throw Unstructured("unhandled control instruction " + OpcodeName(I.Op));

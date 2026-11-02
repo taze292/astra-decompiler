@@ -46,6 +46,7 @@ local DefaultOptions = {
     NativeCaptures = true,
     MethodSyntax = true,
     CompactArrays = true,
+    VectorConstructor = "Vector3.new", -- spelling of constant-folded vectors, e.g. "vector.create"
 
     -- Spacing
     IndentWidth = 4,
@@ -310,7 +311,7 @@ local function RequestOptions(Overrides)
             if Value ~= Value or Value < 0 or Value >= math.huge or Value % 1 ~= 0 then
                 error("Invalid option value for " .. Key .. ": expected a nonnegative finite integer")
             end
-        elseif type(Value) == "string" and (Value == "" or not Value:match("^[%w_%-]+$")) then
+        elseif type(Value) == "string" and (Value == "" or not Value:match("^[%w_%-%.]+$")) then
             error("Invalid option value for " .. Key)
         end
 

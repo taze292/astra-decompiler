@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <charconv>
 #include <cmath>
 #include <cstring>
 #include <iomanip>
@@ -361,6 +362,14 @@ void Decode(Chunk &C, OpcodeEncoding Encoding)
                 if (I.B != 255)
                     Reg(I.B);
                 break;
+            case LOP_CONSTRUCT:
+            case LOP_GETPRIVATEFIELD:
+                Reg(I.B);
+                break;
+            case LOP_SETPRIVATEFIELD:
+                Reg(I.A);
+                Reg(I.B);
+                break;
             default:
                 break;
             }
@@ -443,6 +452,8 @@ std::vector<unsigned> Writes(const Instruction &I, const Prototype &P)
     case LOP_NATIVECALL:
     case LOP_CMPPROTO:
     case LOP_NEWCLASSMEMBER:
+    case LOP_FINCONSTRUCT:
+    case LOP_SETPRIVATEFIELD:
         return {};
     case LOP_NAMECALL:
     case LOP_NAMECALLUDATA:
@@ -461,7 +472,10 @@ std::vector<unsigned> Writes(const Instruction &I, const Prototype &P)
     case LOP_FORNLOOP:
         return {I.A + 2};
     case LOP_FORNPREP:
-        return {};
+        // Preparation coerces the start value into the index register. The
+        // first iteration's index is therefore a definition of its own, distinct
+        // from the expression that computed the start value before the loop.
+        return {I.A + 2};
     case LOP_FORGPREP:
     case LOP_FORGPREP_NEXT:
     case LOP_FORGPREP_INEXT:
@@ -771,18 +785,24 @@ std::string Quote(std::string_view Text)
     return Result + '"';
 }
 
-std::string Number(double Value)
+std::string Number(double Value, bool Single)
 {
     if (std::isnan(Value))
         return "(0 / 0)";
     if (std::isinf(Value))
-        return Value < 0 ? "(-1 / 0)" : "(1 / 0)";
+        return Value < 0 ? "-math.huge" : "math.huge";
     if (Value == 0 && std::signbit(Value))
         return "-0.0";
-    std::ostringstream Out;
-    Out.imbue(std::locale::classic());
-    Out << std::setprecision(17) << Value;
-    return Out.str();
+    char Fixed[512], Scientific[64];
+    auto Format = [&](char *First, char *Last, std::chars_format Style)
+    {
+        auto Result = Single ? std::to_chars(First, Last, float(Value), Style) : std::to_chars(First, Last, Value, Style);
+        return Result.ec == std::errc{} ? std::string_view(First, std::size_t(Result.ptr - First)) : std::string_view();
+    };
+    auto Plain = Format(Fixed, Fixed + sizeof(Fixed), std::chars_format::fixed);
+    auto Exponent = Format(Scientific, Scientific + sizeof(Scientific), std::chars_format::scientific);
+    // Prefer ordinary decimal notation unless it is much longer, as for 1e-10 or 1e20.
+    return std::string(!Plain.empty() && (Exponent.empty() || Plain.size() <= Exponent.size() + 4) ? Plain : Exponent);
 }
 
 std::string OpcodeName(LuauOpcode Op)
@@ -877,7 +897,11 @@ std::string OpcodeName(LuauOpcode Op)
                                   "CALLFB",
                                   "CMPPROTO",
                                   "FASTPCALL",
-                                  "NEWCLASS"};
+                                  "NEWCLASS",
+                                  "CONSTRUCT",
+                                  "FINCONSTRUCT",
+                                  "GETPRIVATEFIELD",
+                                  "SETPRIVATEFIELD"};
     static_assert(std::size(Names) == LOP__COUNT, "Update opcode names for the supplied Luau version");
     return Names[unsigned(Op)];
 }

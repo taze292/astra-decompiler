@@ -20,6 +20,7 @@ Boolean flags accept `true` or `false`; `--no-key` disables an option. Enum valu
 | `infer-calls` | `InferCallNames` | true | Infer service, module, constructor, Connection, and RaycastResult names |
 | `local-prefix` | `LocalPrefix` | `Value` | Prefix for anonymous locals without a selected type name; ASCII identifier, 1–32 characters |
 | `argument-prefix` | `ArgumentPrefix` | `Argument` | Prefix for anonymous parameters; same identifier rules |
+| `vector-constructor` | `VectorConstructor` | `Vector3.new` | Function that spells constant-folded vectors; a dotted identifier path such as `vector.create` for non-Roblox Luau |
 
 ### Layout
 

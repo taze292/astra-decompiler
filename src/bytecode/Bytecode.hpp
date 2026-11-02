@@ -70,7 +70,9 @@ struct Chunk
 
 Chunk ReadBytecode(std::string_view Data, const Options &Settings);
 std::string Quote(std::string_view Text);
-std::string Number(double Value);
+// Shortest decimal text that reads back as the same double (or, with
+// Single, as the same 32-bit float vector component).
+std::string Number(double Value, bool Single = false);
 std::string OpcodeName(LuauOpcode Op);
 std::vector<unsigned> Writes(const Instruction &I, const Prototype &P);
 } // namespace Astra

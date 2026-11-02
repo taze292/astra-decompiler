@@ -5,6 +5,7 @@
 #include "Luau/Compiler.h"
 #include "lua.h"
 #include "lualib.h"
+#include <algorithm>
 #include <fstream>
 #include <iostream>
 #include <memory>
@@ -122,6 +123,35 @@ int main()
         {"member_effects", "local n=0; local t=setmetatable({}, {__index=function(_,k) n+=1 return function() n+=10 return n end end}); "
                            "local f=t.a; local g=t.b; return f(),g(),n"},
         {"binary_concat", "local function f(x,y,z) return x..y..z end return f('a','b','c')"},
+        // Recovered value expressions, constructors, closures, and conditions.
+        {"ternary_concat",
+         "local function f(c,n) return '<'..(c and n or 's')..'>' end return f(true,'a'),f(false,'a'),f(true,nil),f(nil,false)"},
+        {"ternary_or_and", "local function f(a,b,c) local x=(a or b) and c; local y=a and b or c; return x,y end "
+                           "local p,q=f(1,nil,3); local r,s=f(nil,nil,3); local u,v=f(nil,2,false); local w,z=f(false,2,4); "
+                           "return p,q,r,s,u,v,w,z"},
+        {"ternary_effects", "local log=''; local function v(x) log..=tostring(x) return x end "
+                            "local a=v(1) and v(false) or v(3); local b=(v(nil) or v(5)) and v(6); return a,b,log"},
+        {"constructor_calls", "local function g(...) return ... end local function f(...) local t={g(1,2),x=g(3),g(...)} "
+                              "return #t,t[1],t[2],t[3],t[4],t.x end return f(7,8,9)"},
+        {"constructor_truncation", "local function two() return 1,2 end local t={two(),(two())} local u={y=two(),two()} "
+                                   "return #t,t[1],t[2],t[3],#u,u.y,u[2]"},
+        {"constructor_varargs", "local function f(...) local t={...} local u={0,...} return select('#',...),#t,#u,u[1],u[4] end "
+                                "return f(4,5,6)"},
+        {"inline_closures", "local log={} local function on(f) log[#log+1]=f end on(function() return 1 end) "
+                            "on(function(x) return x*2 end) local t={cb=function() return 3 end} return log[1](),log[2](4),t.cb()"},
+        {"generic_loop_capture", "local fs={} for i,v in ipairs({10,20,30}) do fs[i]=function() return v+i end end "
+                                 "return fs[1](),fs[2](),fs[3]()"},
+        {"negated_conditions", "local function f(a,b) if not (not a or not b) then return 1 elseif not (a==b) then return 2 "
+                               "elseif not not a then return 3 end return 4 end return f(1,2),f(nil,2),f(nil,nil),f(false,nil),f(1,1)"},
+        {"guarded_setup", "local t={} local function get(k) if not t[k] then t[k]=k*2 if t[k]>2 then t.big=(t.big or 0)+1 end end "
+                          "return t[k] end return get(1),get(2),get(2),get(3),t.big"},
+        {"builtin_tail", "local function n(...) return select('#',...) end return n(math.abs(-3)),n(math.max(1,2)),"
+                         "n(string.byte('ab',1,2)),n((string.byte('ab',1,2)))"},
+        {"import_order", "local n=0 local t=setmetatable({},{__index=function() n+=1 return n*4 end}) "
+                         "return math.floor(t.y/3),math.max(t.a,t.b),n"},
+        {"logical_chains", "local function f(a,b,c) return (a and (b and c)), (a or (b or c)) end local p,q=f(1,2,3); "
+                           "local r,s=f(nil,2,3); local u,v=f(1,false,3); return p,q,r,s,u,v"},
+        {"numeric_float_literals", "return 0.1+0.2, 1e-10*3, 123456789.25, -0.5, 2^53"},
         {"yield", "local f=coroutine.wrap(function() for i=1,3 do coroutine.yield(i) end return 4 end); return f(),f(),f(),f()"},
         {"cf_enum_chain",
          "local function f(x) local result; if x==1 or x==2 or x==3 then result=8 elseif x==4 then result=9 else return -1 end "
@@ -445,11 +475,19 @@ int main()
         }
     }
     RobloxEncoder Encoder;
-    const std::vector<std::pair<unsigned, std::string>> Versions = {{9, ""},
-                                                                    {11, "LuauEmitCallFeedback"},
-                                                                    {12, "LuauBytecodeCostModel"},
-                                                                    {13, "LuauCompileEmitVectorDouble"},
-                                                                    {14, "LuauCompileFastpcall"}};
+    // Luau promotes version flags into its default target over time. Exercise
+    // the default version plus every version-raising flag this checkout still has.
+    std::vector<std::pair<unsigned, std::string>> Versions{{unsigned(std::uint8_t(Luau::compile("return 1")[0])), ""}};
+    for (const char *FlagName : {"LuauEmitCallFeedback", "LuauBytecodeCostModel", "LuauCompileEmitVectorDouble", "LuauCompileFastpcall"})
+        for (auto *Flag = Luau::FValue<bool>::list; Flag; Flag = Flag->next)
+            if (std::string_view(Flag->name) == FlagName && !Flag->value)
+            {
+                Flag->value = true;
+                unsigned Version = std::uint8_t(Luau::compile("return 1")[0]);
+                Flag->value = false;
+                if (std::none_of(Versions.begin(), Versions.end(), [&](const auto &Entry) { return Entry.first == Version; }))
+                    Versions.emplace_back(Version, FlagName);
+            }
     for (const auto &[Version, FlagName] : Versions)
     {
         Luau::FValue<bool> *Enabled = nullptr;
@@ -461,12 +499,6 @@ int main()
                 Old = Flag->value;
                 Flag->value = true;
             }
-        if (!FlagName.empty() && !Enabled)
-        {
-            std::cerr << "Missing version flag " << FlagName << '\n';
-            Failed++;
-            continue;
-        }
         for (const auto &[Name, Source] : Fixtures)
         {
             try
@@ -516,33 +548,33 @@ int main()
             else if (std::string_view(Flag->name) == "LuauCompileEmitVectorDouble")
                 VectorDouble = Flag;
         }
-        if (!CostModel || !VectorDouble)
         {
-            std::cerr << "Missing v12/v13 feature flags\n";
-            Failed++;
-        }
-        else
-        {
-            bool OldCostModel = CostModel->value;
-            bool OldVectorDouble = VectorDouble->value;
+            // Newer Luau checkouts emit version 13 double vectors by default and no longer have these flags.
+            bool OldCostModel = CostModel ? CostModel->value : false;
+            bool OldVectorDouble = VectorDouble ? VectorDouble->value : false;
             try
             {
                 Luau::CompileOptions Options;
                 Options.optimizationLevel = 2;
                 Options.vectorPrecision = 1;
                 const std::string Source = "return vector.create(1, 1/2^32, 1/2^256)";
+                Astra::Options Portable;
+                Portable.VectorConstructor = "vector.create";
 
-                CostModel->value = true;
-                VectorDouble->value = false;
-                auto V12 = Luau::compile(Source, Options);
-                auto V12Result = Astra::Decompile(V12);
-                if (V12Result.BytecodeVersion != 12 || V12Result.Source.find("vector.create(") == std::string::npos)
-                    throw std::runtime_error("Version 12 vector compatibility regressed");
+                if (CostModel && VectorDouble)
+                {
+                    CostModel->value = true;
+                    VectorDouble->value = false;
+                    auto V12 = Luau::compile(Source, Options);
+                    auto V12Result = Astra::Decompile(V12, Portable);
+                    if (V12Result.BytecodeVersion != 12 || V12Result.Source.find("vector.create(") == std::string::npos)
+                        throw std::runtime_error("Version 12 vector compatibility regressed");
+                    VectorDouble->value = true;
+                }
 
-                VectorDouble->value = true;
                 auto V13 = Luau::compile(Source, Options);
-                auto V13Result = Astra::Decompile(V13);
-                if (V13Result.BytecodeVersion != 13 || V13Result.Source.find("8.636") == std::string::npos)
+                auto V13Result = Astra::Decompile(V13, Portable);
+                if (V13Result.BytecodeVersion < 13 || V13Result.Source.find("8.636") == std::string::npos)
                     throw std::runtime_error("Version 13 double-vector precision was not preserved");
                 auto Recompiled = Luau::compile(V13Result.Source, Options);
                 if (Recompiled.empty() || Recompiled[0] == 0)
@@ -565,8 +597,10 @@ int main()
                 Failed++;
                 std::cerr << "FAIL v12/v13 feature boundary: " << Error.what() << '\n';
             }
-            CostModel->value = OldCostModel;
-            VectorDouble->value = OldVectorDouble;
+            if (CostModel)
+                CostModel->value = OldCostModel;
+            if (VectorDouble)
+                VectorDouble->value = OldVectorDouble;
         }
     }
     // Malformed headers and length fields must be rejected, including overflow and unknown versions.

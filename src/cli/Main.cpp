@@ -62,6 +62,7 @@ int main(int Argc, char **Argv)
                              "  --no-upvalue-indexes         Hide capture indexes in either comment style\n"
                              "  --no-group-spacing           Omit statement-group blank lines\n"
                              "  --compact-arrays true        Shorten safe sequential array prefixes (default true)\n"
+                             "  --vector-constructor PATH    Spell constant vectors (default Vector3.new)\n"
                              "  --use-tabs true              Indent with tabs instead of spaces\n"
                              "  --blank-lines-between-groups N  Group spacing (0..3; default 1)\n"
                              "  --space-inside-table-braces true  Pad inline table braces (default true)\n"
