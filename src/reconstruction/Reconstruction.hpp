@@ -27,11 +27,29 @@ std::string Join(const std::vector<std::string> &Items, const std::string &Separ
 std::size_t Closing(const std::string &Text, std::size_t Start);
 std::string Unwrap(std::string Text);
 bool PrefixExpression(const std::string &Text);
+bool CallExpression(const std::string &Text);
+// Deepest bracket nesting outside string literals. Inlining stays well below
+// the recursion limits of Luau's parser.
+unsigned NestingDepth(const std::string &Text);
+// Number of occurrences of Needle in Text, counting no further than Limit.
+unsigned Occurrences(const std::string &Text, const std::string &Needle, unsigned Limit);
+constexpr unsigned MaxInlineNesting = 40;
+// Whether an operand spanning [Begin, End) is the final element of a call
+// argument list, table constructor, or (when ListAtEnd) a statement's list.
+bool MultiValueSlot(const std::string &Text, std::size_t Begin, std::size_t End, bool ListAtEnd);
 std::string CleanExpression(std::string Text);
 std::string Negate(std::string Text);
 std::string CleanCondition(std::string Text);
 std::vector<std::string> SplitLogical(const std::string &Text, const std::string &Operator);
 std::string FormatCondition(std::string Text, unsigned ParentPrecedence = 0);
+// Remove grouping parentheses that cannot change the parse or value count.
+// SimplifyList formats an expression list; SimplifyStatement an assignment or call.
+std::string SimplifyList(const std::string &Text, bool TailLast);
+std::string SimplifyStatement(const std::string &Text);
+// Normalize negations in a truthiness-only context (if/while/until).
+std::string SimplifyCondition(const std::string &Text);
+// Whether an expression always evaluates to true or false.
+bool BooleanExpression(const std::string &Text);
 bool Jump(LuauOpcode Op);
 bool Conditional(LuauOpcode Op);
 
@@ -59,6 +77,13 @@ struct Statement
     // Captured identities that must be declared outside this repeated region.
     // These are lexical lifetime constraints, not reads or writes in the VM.
     std::vector<unsigned> Lifetime;
+    // A table constructor assignment keeps its fields as (key, value) pairs.
+    // An empty value is a template slot that a later field store fills.
+    bool Constructor = false;
+    std::vector<std::pair<std::string, std::string>> Fields;
+    // A SETLIST store `t[n] = v` of an array item; Expand marks the store of
+    // every value of an open call or vararg tail, starting at index n.
+    bool ListItem = false, Expand = false;
     Statement(Kind K = Kind::Raw, std::vector<unsigned> L = {}, std::string T = {}, std::vector<Statement> B = {},
               std::vector<Statement> Other = {}, bool P = false, bool C = false)
         : Type(K), Left(std::move(L)), Text(std::move(T)), Body(std::move(B)), Else(std::move(Other)), Pure(P), Call(C)
@@ -76,6 +101,10 @@ struct Symbol
     bool Preserve = false;
     bool Debug = false;
     bool ImplicitSelf = false;
+    // Read by a nested closure body, so the binding must stay a variable.
+    bool Captured = false;
+    // A loop variable the body never reads, rendered as `_`.
+    bool Discard = false;
 };
 struct Upvalue
 {
@@ -121,6 +150,9 @@ class Function
     unsigned OpenExpressionBase = 0;
     std::string OpenHint;
     std::map<unsigned, std::string> Hints;
+    // Global paths this function loads with GETIMPORT; their values are fixed
+    // when the closure loads, so their text can be reordered freely.
+    std::set<std::string> ImportPaths;
     std::vector<unsigned> RegionVisits;
     std::vector<unsigned> NaturalLoopEnds, LoopRegionEnds;
     void FindLoopRegions();
@@ -129,6 +161,8 @@ class Function
     bool EquivalentExit(unsigned Left, unsigned Right) const;
     unsigned LoopContinuation(unsigned Head, unsigned Tail, unsigned Limit, std::vector<Statement> &Before, bool &GuardDefault);
     bool PredicateRegion(unsigned Pos, unsigned Limit, unsigned &LastTest, unsigned &Fallthrough, int &Target, std::string &Test);
+    bool ShortCircuitValue(unsigned Pos, unsigned Limit, std::vector<Statement> &Out, unsigned &Resume);
+    bool CollapseValue(std::vector<Statement> List, unsigned Result, std::string &Value);
     std::map<const std::vector<Statement> *, std::set<unsigned>> ScopedDeclarations;
     void BuildDataflow();
     void CountDefinitions();
@@ -139,6 +173,9 @@ class Function
     std::string ConstantAt(unsigned Index, unsigned Recursion = 0) const;
     std::string Locator() const;
     std::string Member(const std::string &Object, unsigned Index) const;
+    std::string TableText(const std::vector<std::pair<std::string, std::string>> &Fields) const;
+    bool SingleResultBuiltin(const Instruction &Call) const;
+    bool FixedCapture(unsigned Symbol, unsigned Register, unsigned Capture) const;
     std::string Global(unsigned Index) const;
     Statement Assign(unsigned R, const Instruction &I, std::string Value, bool Pure = false, bool Call = false);
     void Simple(const Instruction &I, std::vector<Statement> &Out);

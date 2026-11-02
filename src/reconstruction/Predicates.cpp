@@ -233,3 +233,134 @@ bool Function::PredicateRegion(unsigned Pos, unsigned Limit, unsigned &LastTest,
     return true;
 }
 } // namespace Astra::Detail
+
+namespace Astra::Detail
+{
+bool Function::CollapseValue(std::vector<Statement> List, unsigned Result, std::string &Value)
+{
+    // Inline every temporary of a straight-line value computation into the
+    // final assignment. A sentinel read keeps the result alive while the
+    // ordinary optimizer runs on this isolated list.
+    if (E.Symbols[Result].Cell)
+        return false;
+    List.push_back({Kind::Raw, {}, Token(Result)});
+    for (unsigned Pass = 0; Pass < 8 && Optimize(List); ++Pass)
+        ;
+    if (List.size() == 1 && List[0].Type == Kind::Raw)
+    {
+        Value = List[0].Text;
+        return true;
+    }
+    if (List.size() == 2 && List[0].Type == Kind::Assign && List[0].Left == std::vector<unsigned>{Result} && List[1].Text == Token(Result))
+    {
+        Value = List[0].Text;
+        return true;
+    }
+    return false;
+}
+
+bool Function::ShortCircuitValue(unsigned Pos, unsigned Limit, std::vector<Statement> &Out, unsigned &Resume)
+{
+    // `a and b or c` and `(a or b) and c` compile to a test chain that jumps
+    // to the last operand, the middle operand computed into the result, and a
+    // final truthiness test of that result that either keeps it or falls into
+    // the last operand:
+    //
+    //     tests -> Else; [b -> R]; JUMPIF(NOT) R -> End; Else: [c -> R]; End:
+    //
+    // Each operand must collapse into a single expression; otherwise the
+    // ordinary statement reconstruction handles the region.
+    const auto &First = P.Instructions[Pos];
+    if (First.Target() <= int(First.Pc))
+        return false;
+    unsigned Last = Pos;
+    while (Last + 1 < Limit && Conditional(P.Instructions[Last + 1].Op) && P.Instructions[Last + 1].Target() == First.Target() &&
+           Flow.Predecessors[Last + 1].size() == 1 && Flow.Predecessors[Last + 1][0] == Last)
+        ++Last;
+    unsigned Else = Index(unsigned(First.Target()));
+    if (Else >= Limit || Else < Last + 3)
+        return false;
+    unsigned Test = Else - 1;
+    const auto &Exit = P.Instructions[Test];
+    if ((Exit.Op != LOP_JUMPIF && Exit.Op != LOP_JUMPIFNOT) || Exit.Target() <= int(Exit.Pc))
+        return false;
+    unsigned End = Index(unsigned(Exit.Target()));
+    if (End <= Else || End > Limit)
+        return false;
+    const unsigned R = Exit.A;
+    if (Cells.count(R) || ScalarReferences.count(R))
+        return false;
+    auto Straight = [&](unsigned From, unsigned To)
+    {
+        for (unsigned K = From; K < To; ++K)
+        {
+            const auto &I = P.Instructions[K];
+            if (Conditional(I.Op) || Jump(I.Op) || I.Op == LOP_RETURN || (I.Op == LOP_LOADB && I.C) || I.Op == LOP_CMPPROTO ||
+                I.Op == LOP_FORNPREP || I.Op == LOP_FORNLOOP || I.Op == LOP_FORGPREP || I.Op == LOP_FORGPREP_NEXT ||
+                I.Op == LOP_FORGPREP_INEXT || I.Op == LOP_FORGLOOP || I.Op == LOP_CLOSEUPVALS)
+                return false;
+            if (Flow.Predecessors[K].size() != 1 || Flow.Predecessors[K][0] + 1 != K)
+                if (K != Else)
+                    return false;
+            E.Analysis.Spend();
+        }
+        return true;
+    };
+    if (!Straight(Last + 1, Test) || !Straight(Else, End) || Flow.Predecessors[Test].size() != 1 || Flow.Predecessors[Test][0] + 1 != Test)
+        return false;
+    for (unsigned Before : Flow.Predecessors[Else])
+        if ((Before < Pos || Before > Last) && Before != Test)
+            return false;
+    for (unsigned Before : Flow.Predecessors[End])
+        if (Before != Test && Before + 1 != End)
+            return false;
+    // Both operands produce the result; no other value they compute survives.
+    auto Produces = [&](unsigned From, unsigned To, std::initializer_list<unsigned> Exits)
+    {
+        bool Writes = false;
+        for (unsigned K = From; K < To; ++K)
+            for (unsigned W : Astra::Writes(P.Instructions[K], P))
+            {
+                if (W == R)
+                {
+                    Writes = true;
+                    continue;
+                }
+                for (unsigned X : Exits)
+                    if (Flow.LiveIn[X].test(W))
+                        return false;
+            }
+        return Writes;
+    };
+    if (!Produces(Last + 1, Test, {Else, End}) || !Produces(Else, End, {End}))
+        return false;
+    unsigned Result = SymbolAt(R, Exit.Pc);
+    if (Result != SymbolAt(R, P.Instructions[End - 1].Pc, true) || E.Symbols[Result].Cell)
+        return false;
+    std::vector<Statement> Middle, Alternative;
+    for (unsigned K = Last + 1; K < Test; ++K)
+        Simple(P.Instructions[K], Middle);
+    for (unsigned K = Else; K < End; ++K)
+        Simple(P.Instructions[K], Alternative);
+    std::string B, C;
+    if (!OpenExpression.empty() || !PendingMethod.empty() || !CollapseValue(std::move(Middle), Result, B) ||
+        !CollapseValue(std::move(Alternative), Result, C))
+        return false;
+    std::vector<std::string> Taken;
+    for (unsigned K = Pos; K <= Last; ++K)
+        Taken.push_back("(" + Condition(P.Instructions[K]) + ")");
+    std::string Value;
+    if (Exit.Op == LOP_JUMPIF)
+    {
+        std::vector<std::string> Enter;
+        for (const auto &Text : Taken)
+            Enter.push_back("(" + Negate(Text) + ")");
+        Value = "(" + Join(Enter, " and ") + " and (" + B + ") or (" + C + "))";
+    }
+    else
+        Value = "((" + Join(Taken, " or ") + " or (" + B + ")) and (" + C + "))";
+    Out.push_back(Assign(R, P.Instructions[End - 1], Value));
+    Resume = End;
+    return true;
+}
+} // namespace Astra::Detail

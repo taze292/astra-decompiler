@@ -198,8 +198,10 @@ std::string FormatTables(std::string Source, const Options &Settings)
             auto [Begin, End] = T.Fields[N];
             auto ValueBegin = Tokens[Begin + 4].Begin, ValueEnd = Tokens[End - 1].End;
             // An explicit keyed field always consumes one result. A final
-            // positional call or vararg must keep that single-result contract.
-            bool Single = Tokens[End - 1].Text == ")" || std::string_view(Source).substr(ValueBegin, ValueEnd - ValueBegin) == "...";
+            // positional call or vararg must keep that single-result contract;
+            // any earlier positional field is truncated by the language.
+            bool Single = N + 1 == T.Fields.size() &&
+                          (Tokens[End - 1].Text == ")" || std::string_view(Source).substr(ValueBegin, ValueEnd - ValueBegin) == "...");
             Edits.push_back({Tokens[Begin].Begin, ValueBegin, Single ? "(" : ""});
             if (Single)
                 Edits.push_back({ValueEnd, ValueEnd, ")", true});
@@ -313,6 +315,12 @@ std::string Engine::Resolve(std::string Text)
                 S.Name = "self";
                 continue;
             }
+            // Any number of `_` placeholders may share a scope.
+            if (S.Discard && !GlobalNames.count("_"))
+            {
+                S.Name = "_";
+                continue;
+            }
             std::string Base = S.Name;
             bool Generic = Base.starts_with("Value") && Base.size() > 5 &&
                            std::all_of(Base.begin() + 5, Base.end(), [](unsigned char C) { return std::isdigit(C); });
@@ -335,6 +343,9 @@ std::string Engine::Resolve(std::string Text)
             {
                 Base = S.Preserve && Settings.PreserveFunctionNames && Identifier(S.Original) ? S.Original
                                                                                               : CaseName(S.Original, Settings.Casing);
+                // An inferred constructor result must not shadow a method's receiver.
+                if (S.Original == "self" && !S.Debug && Taken.count(Base))
+                    Base = CaseName("Object", Settings.Casing);
                 S.Name = Base;
                 if (Taken.count(S.Name))
                 {

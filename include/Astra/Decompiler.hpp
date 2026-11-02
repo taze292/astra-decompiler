@@ -65,6 +65,8 @@ struct Options
     std::size_t MaxAnalysisCells = 16000000;
     std::size_t MaxAnalysisWork = 32000000;
     std::string FilterLineField = "Line";
+    // Function used to spell constant-folded vectors; Roblox folds Vector3.new.
+    std::string VectorConstructor = "Vector3.new";
     std::string ModulePath;
     std::size_t MaxInputBytes = 64 * 1024 * 1024;
     std::size_t MaxOutputBytes = 64 * 1024 * 1024;

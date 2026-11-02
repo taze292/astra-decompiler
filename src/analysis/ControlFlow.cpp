@@ -109,6 +109,13 @@ std::vector<unsigned> Reads(const Instruction &I, const Prototype &P)
         if (I.B != 255)
             Result.push_back(I.B);
         break;
+    case LOP_CONSTRUCT:
+    case LOP_GETPRIVATEFIELD:
+        return {I.B};
+    case LOP_SETPRIVATEFIELD:
+        return {I.A, I.B};
+    case LOP_FINCONSTRUCT:
+        return {I.A};
     default:
         break;
     }

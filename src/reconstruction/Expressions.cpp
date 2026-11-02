@@ -201,6 +201,97 @@ bool PrefixExpression(const std::string &Text)
     return true;
 }
 
+unsigned Occurrences(const std::string &Text, const std::string &Needle, unsigned Limit)
+{
+    // Source tokens are delimited, so one token never occurs inside another.
+    unsigned Count = 0;
+    for (auto Pos = Text.find(Needle); Pos != std::string::npos && Count < Limit; Pos = Text.find(Needle, Pos + Needle.size()))
+        ++Count;
+    return Count;
+}
+
+unsigned NestingDepth(const std::string &Text)
+{
+    unsigned Depth = 0, Deepest = 0;
+    char QuoteChar = 0;
+    for (std::size_t I = 0; I < Text.size(); ++I)
+    {
+        char C = Text[I];
+        if (QuoteChar)
+        {
+            if (C == '\\')
+                ++I;
+            else if (C == QuoteChar)
+                QuoteChar = 0;
+            continue;
+        }
+        if (C == '\'' || C == '"')
+            QuoteChar = C;
+        else if (C == '(' || C == '[' || C == '{')
+            Deepest = std::max(Deepest, ++Depth);
+        else if ((C == ')' || C == ']' || C == '}') && Depth)
+            --Depth;
+    }
+    return Deepest;
+}
+
+bool CallExpression(const std::string &Text)
+{
+    return Text == "..." || (Text.ends_with(')') && PrefixExpression(Text));
+}
+
+bool MultiValueSlot(const std::string &Text, std::size_t Begin, std::size_t End, bool ListAtEnd)
+{
+    // Only the final element of an expression list receives every result of a
+    // call or vararg expression. Find what terminates the operand at End.
+    std::size_t Pos = End;
+    while (Pos < Text.size() && Text[Pos] == ' ')
+        ++Pos;
+    if (Pos == Text.size())
+        return ListAtEnd;
+    if (Text[Pos] == '}')
+        return true;
+    if (Text[Pos] != ')')
+        return false;
+    // A closing parenthesis ends either call arguments or a grouping. Match it
+    // backwards while skipping quoted strings, then inspect what precedes it.
+    unsigned Depth = 0;
+    for (std::size_t I = Begin; I-- > 0;)
+    {
+        char C = Text[I];
+        if (C == '"' || C == '\'')
+        {
+            // Strings are emitted with escapes, so the opening quote is the
+            // nearest unescaped quote of the same kind.
+            while (I-- > 0 && !(Text[I] == C && (I == 0 || Text[I - 1] != '\\')))
+                ;
+            if (I == std::size_t(-1))
+                return true;
+            continue;
+        }
+        if (C == ')' || C == ']' || C == '}')
+            ++Depth;
+        else if (C == '(' || C == '[' || C == '{')
+        {
+            if (Depth)
+            {
+                --Depth;
+                continue;
+            }
+            if (C != '(')
+                return true;
+            auto Before = I;
+            while (Before && Text[Before - 1] == ' ')
+                --Before;
+            if (!Before)
+                return false;
+            auto P = static_cast<unsigned char>(Text[Before - 1]);
+            return std::isalnum(P) || P == '_' || P == '\x1e' || P == ')' || P == ']' || P == '"' || P == '\'';
+        }
+    }
+    return true;
+}
+
 std::string CleanExpression(std::string Text)
 {
     if (Text.find('\n') != std::string::npos)
