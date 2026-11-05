@@ -119,6 +119,12 @@ try {
     Send-Text $Socket ("92`nASTRA4`nLine`n`n$PascalOptions`n" + $Module.Hex)
     $PascalReply = Receive-Text $Socket
     Check ($PascalReply.StartsWith("92`nok`n") -and $PascalReply.Contains("-- Decompiled with Astra | Bytecode Version:") -and $PascalReply.Contains("`treturn")) 'PascalCase option table/spacing failed'
+    $DefaultOptions = '{"AllowFallback":false,"ArgumentPrefix":"Argument","BlankLinesBetweenGroups":1,"Casing":"pascal","CompactArrays":true,"CompactUpvalues":false,"Encoding":"auto","ForceStateMachine":false,"GroupSpacing":true,"IncludeFunctionLocators":true,"IncludeGcLocators":true,"IncludeHeader":true,"IncludeLineComments":true,"IncludeRequireLocators":true,"IncludeUpvalueComments":true,"IncludeUpvalueIndexes":true,"IndentWidth":4,"InferCallNames":true,"InferMemberNames":true,"LocalPrefix":"Value","MaxAnalysisCells":16000000,"MaxAnalysisWork":32000000,"MaxInputBytes":67108864,"MaxOutputBytes":67108864,"MaxNesting":128,"MethodSyntax":true,"Naming":"inferred","NativeCaptures":true,"OptimizationPasses":5,"PreserveFunctionNames":true,"SpaceInsideTableBraces":true,"UseTabs":false,"UseTypeNames":true,"VectorConstructor":"Vector3.new"}'
+    Send-Text $Socket ("98`nASTRA4`nLine`n`n$DefaultOptions`n" + $Small.Hex)
+    Check ((Receive-Text $Socket).StartsWith("98`nok`n")) 'Default JSON options with a dotted string value failed'
+    $DefaultHeader = [Text.Encoding]::UTF8.GetBytes("99`nASTRA5`nLine`n`n$DefaultOptions`n")
+    Send-Binary $Socket ([byte[]]($DefaultHeader + $Small.Bytes))
+    Check ((Receive-Text $Socket).StartsWith("99`nok`n")) 'Default binary options with a dotted string value failed'
     foreach ($Bad in @('{"IncludeHeader":true,"header":false}', '{"ModulePath":"game"}', '{"FilterLineField":"Line"}', '{"MaxAnalysisWork":64000000}', '{"MaxOutputBytes":268435456}', '{"BlankLinesBetweenGroups":4}', '{"compactArrays":true}', '{"ForceStateMachine":true}')) {
         Send-Text $Socket ("93`nASTRA4`nLine`n`n$Bad`n" + $Small.Hex)
         Check ((Receive-Text $Socket).StartsWith("93`nerror`n")) "Invalid PascalCase/alias options accepted: $Bad"
