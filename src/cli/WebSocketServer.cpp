@@ -306,11 +306,12 @@ void JsonOptions(Options &Settings, std::string_view Text)
         if (Pos >= Text.size() || Text[Pos++] != C)
             throw Error("Invalid JSON option object");
     };
-    auto Word = [&]()
+    auto Word = [&](bool Dots = false)
     {
         auto Begin = Pos;
         while (Pos < Text.size() && ((Text[Pos] >= 'a' && Text[Pos] <= 'z') || (Text[Pos] >= 'A' && Text[Pos] <= 'Z') ||
-                                     (Text[Pos] >= '0' && Text[Pos] <= '9') || Text[Pos] == '-' || Text[Pos] == '_'))
+                                     (Text[Pos] >= '0' && Text[Pos] <= '9') || Text[Pos] == '-' || Text[Pos] == '_' ||
+                                     (Dots && Text[Pos] == '.')))
             ++Pos;
         if (Pos == Begin)
             throw Error("Invalid JSON option value");
@@ -330,7 +331,7 @@ void JsonOptions(Options &Settings, std::string_view Text)
             bool Quoted = Pos < Text.size() && Text[Pos] == '"';
             if (Quoted)
                 ++Pos;
-            auto Value = Word();
+            auto Value = Quoted ? Word(true) : Word();
             if (Quoted)
                 Expect('"');
             else if (Value != "true" && Value != "false" &&
